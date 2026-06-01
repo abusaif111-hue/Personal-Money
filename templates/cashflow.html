@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+{% block title %}Cash Flow Planner{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Cash Flow Planner</h1>
+    <p class="page-subtitle">10-year financial projection with salary growth and inflation</p>
+</div>
+
+<div class="row g-4">
+    <!-- Settings Panel -->
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-sliders text-primary me-2"></i>Projection Settings
+                </h5>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('save_cashflow') }}" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">Base Monthly Salary (RM)</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">RM</span>
+                            <input type="number" name="base_monthly_salary" class="form-control"
+                                   min="0" step="0.01"
+                                   value="{{ settings.base_monthly_salary or 0 }}">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">Annual Salary Increment</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="salary_increment_pct" class="form-control"
+                                   min="0" step="0.1"
+                                   value="{{ settings.salary_increment_pct or 5.0 }}">
+                            <span class="input-group-text">% / year</span>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">Annual Bonus (RM)</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">RM</span>
+                            <input type="number" name="annual_bonus" class="form-control"
+                                   min="0" step="0.01"
+                                   value="{{ settings.annual_bonus or 0 }}">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">13th Month Salary (RM)</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">RM</span>
+                            <input type="number" name="thirteenth_month_salary" class="form-control"
+                                   min="0" step="0.01"
+                                   value="{{ settings.thirteenth_month_salary or 0 }}">
+                        </div>
+                        <div class="form-text">Additional month's salary or fixed bonus</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">Other Monthly Income (RM)</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">RM</span>
+                            <input type="number" name="other_monthly_income" class="form-control"
+                                   min="0" step="0.01"
+                                   value="{{ settings.other_monthly_income or 0 }}">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">Monthly Expenses (RM)</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">RM</span>
+                            <input type="number" name="monthly_expenses" class="form-control"
+                                   min="0" step="0.01"
+                                   value="{{ settings.monthly_expenses or 0 }}">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">Expense Inflation Rate</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="expense_inflation_pct" class="form-control"
+                                   min="0" step="0.1"
+                                   value="{{ settings.expense_inflation_pct or 3.0 }}">
+                            <span class="input-group-text">% / year</span>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-save me-1"></i>Save & Recalculate
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Extra Income Sources -->
+        <div class="card">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-plus-circle text-success me-2"></i>Extra Income Sources
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if extra_incomes %}
+                <div class="mb-3">
+                    {% for ei in extra_incomes %}
+                    <div class="d-flex align-items-center justify-content-between p-2 mb-2 rounded bg-light border">
+                        <div>
+                            <div class="fw-medium small">{{ ei.name }}</div>
+                            <div class="text-muted small">
+                                RM {{ "%.2f"|format(ei.amount) }} /
+                                {{ ei.frequency|replace('_', ' ') }}
+                                (Yr {{ ei.start_year }}–{{ ei.end_year }})
+                            </div>
+                        </div>
+                        <form method="POST"
+                              action="{{ url_for('delete_extra_income', income_id=ei.id) }}"
+                              onsubmit="return confirm('Remove this income source?')">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted small mb-3">No extra income sources added yet.</p>
+                {% endif %}
+
+                <!-- Add Extra Income Form -->
+                <form action="{{ url_for('add_extra_income') }}" method="POST">
+                    <div class="mb-2">
+                        <input type="text" name="name" class="form-control form-control-sm"
+                               placeholder="Source name (e.g. Freelance)" required>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">RM</span>
+                                <input type="number" name="amount" class="form-control"
+                                       min="0" step="0.01" placeholder="Amount" required>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <select name="frequency" class="form-select form-select-sm">
+                                <option value="monthly">Monthly</option>
+                                <option value="annual">Annual</option>
+                                <option value="one_time">One-time</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">Yr</span>
+                                <input type="number" name="start_year" class="form-control"
+                                       min="1" max="10" value="1" placeholder="Start">
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">To</span>
+                                <input type="number" name="end_year" class="form-control"
+                                       min="1" max="10" value="10" placeholder="End">
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-success btn-sm w-100">
+                        <i class="bi bi-plus me-1"></i>Add Income Source
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Projection Results -->
+    <div class="col-lg-8">
+        <!-- Chart -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-graph-up-arrow text-primary me-2"></i>10-Year Financial Projection
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if projection and projection[0].annual_income > 0 %}
+                <canvas id="cashflowChart" height="320"></canvas>
+                {% else %}
+                <div class="empty-state py-4">
+                    <i class="bi bi-graph-up fs-1 text-muted"></i>
+                    <p class="text-muted mt-2">Enter your salary details on the left to see the 10-year projection.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Projection Table -->
+        <div class="card">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-table text-primary me-2"></i>Year-by-Year Breakdown
+                </h5>
+                {% if goals %}
+                <span class="badge bg-info text-dark">
+                    <i class="bi bi-bullseye me-1"></i>Includes {{ goals|length }} goal payment{{ 's' if goals|length != 1 else '' }}
+                </span>
+                {% endif %}
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Year</th>
+                                <th class="text-end">Monthly Salary</th>
+                                <th class="text-end">Annual Income</th>
+                                <th class="text-end">Expenses</th>
+                                <th class="text-end">Goal Payments</th>
+                                <th class="text-end">Net Savings</th>
+                                <th class="text-end">Cumulative</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in projection %}
+                            <tr>
+                                <td>
+                                    <span class="badge bg-primary bg-opacity-10 text-primary fw-bold">
+                                        Year {{ row.year }}
+                                    </span>
+                                </td>
+                                <td class="text-end text-muted small">
+                                    RM {{ "{:,.2f}".format(row.monthly_salary) }}
+                                </td>
+                                <td class="text-end fw-semibold text-income">
+                                    RM {{ "{:,.2f}".format(row.annual_income) }}
+                                </td>
+                                <td class="text-end text-expense">
+                                    RM {{ "{:,.2f}".format(row.annual_expenses) }}
+                                </td>
+                                <td class="text-end text-muted">
+                                    {% if row.goal_payments > 0 %}
+                                    RM {{ "{:,.2f}".format(row.goal_payments) }}
+                                    {% else %}—{% endif %}
+                                </td>
+                                <td class="text-end fw-bold {% if row.net_savings >= 0 %}text-income{% else %}text-expense{% endif %}">
+                                    RM {{ "{:,.2f}".format(row.net_savings) }}
+                                </td>
+                                <td class="text-end fw-bold {% if row.cumulative_savings >= 0 %}text-income{% else %}text-expense{% endif %}">
+                                    RM {{ "{:,.2f}".format(row.cumulative_savings) }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const projectionData = {{ projection | tojson }};
+
+if (projectionData.length > 0 && projectionData[0].annual_income > 0) {
+    const labels = projectionData.map(d => `Year ${d.year}`);
+    const incomes = projectionData.map(d => d.annual_income);
+    const expenses = projectionData.map(d => d.annual_expenses);
+    const goalPayments = projectionData.map(d => d.goal_payments);
+    const cumulative = projectionData.map(d => d.cumulative_savings);
+
+    const ctx = document.getElementById('cashflowChart');
+    if (ctx) {
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Annual Income',
+                        data: incomes,
+                        backgroundColor: 'rgba(34,197,94,0.7)',
+                        borderColor: '#22c55e',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        order: 2
+                    },
+                    {
+                        label: 'Expenses',
+                        data: expenses,
+                        backgroundColor: 'rgba(239,68,68,0.7)',
+                        borderColor: '#ef4444',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        order: 2
+                    },
+                    {
+                        label: 'Goal Payments',
+                        data: goalPayments,
+                        backgroundColor: 'rgba(249,115,22,0.7)',
+                        borderColor: '#f97316',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        order: 2
+                    },
+                    {
+                        label: 'Cumulative Savings',
+                        data: cumulative,
+                        type: 'line',
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59,130,246,0.1)',
+                        borderWidth: 3,
+                        pointRadius: 5,
+                        fill: false,
+                        tension: 0.3,
+                        order: 1,
+                        yAxisID: 'y'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'top' },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ` RM ${ctx.parsed.y.toLocaleString('en-MY', {minimumFractionDigits: 2})}`
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { callback: v => 'RM ' + v.toLocaleString() }
+                    }
+                }
+            }
+        });
+    }
+}
+</script>
+{% endblock %}
