@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Profile</h1>
+    <p class="page-subtitle">Manage your personal information and preferences</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-person-circle text-primary me-2"></i>Personal Information
+                </h5>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('save_profile') }}" method="POST">
+                    <div class="text-center mb-4">
+                        <div class="profile-avatar-large mx-auto">
+                            <i class="bi bi-person-fill"></i>
+                        </div>
+                        <h5 class="mt-2 mb-0">{{ profile.name }}</h5>
+                        <span class="text-muted small">{{ profile.family_status|replace('_', ' ')|title }}</span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">Full Name</label>
+                        <input type="text" name="name" class="form-control"
+                               value="{{ profile.name or 'User' }}" placeholder="Your name" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">Family Status</label>
+                        <select name="family_status" class="form-select" id="familyStatus"
+                                onchange="toggleKidsField(this.value)">
+                            <option value="single" {% if profile.family_status == 'single' %}selected{% endif %}>
+                                Single
+                            </option>
+                            <option value="married" {% if profile.family_status == 'married' %}selected{% endif %}>
+                                Married (no kids)
+                            </option>
+                            <option value="married_with_kids"
+                                    {% if profile.family_status == 'married_with_kids' %}selected{% endif %}>
+                                Married with Kids
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3 {% if profile.family_status != 'married_with_kids' %}d-none{% endif %}"
+                         id="kidsField">
+                        <label class="form-label fw-medium">Number of Kids</label>
+                        <input type="number" name="num_kids" class="form-control"
+                               min="0" max="20" value="{{ profile.num_kids or 0 }}">
+                    </div>
+
+                    <hr>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">Monthly Salary (RM)</label>
+                        <div class="input-group">
+                            <span class="input-group-text">RM</span>
+                            <input type="number" name="monthly_salary" class="form-control"
+                                   min="0" step="0.01" value="{{ profile.monthly_salary or 0 }}"
+                                   placeholder="0.00">
+                        </div>
+                        <div class="form-text">Used for spending recommendations on the dashboard.</div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-medium">Annual Salary Increment</label>
+                        <div class="input-group">
+                            <input type="number" name="salary_increment_pct" class="form-control"
+                                   min="0" step="0.1" value="{{ profile.salary_increment_pct or 5.0 }}"
+                                   placeholder="5.0">
+                            <span class="input-group-text">% per year</span>
+                        </div>
+                        <div class="form-text">Expected annual salary increment percentage.</div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-save me-2"></i>Save Profile
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <!-- Spending Profile Card -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-pie-chart text-primary me-2"></i>Your Spending Profile
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Based on your <strong>{{ profile.family_status|replace('_', ' ')|title }}</strong> status,
+                    here are your recommended budget allocations:
+                </p>
+
+                {% set recommendations = {
+                    'single': {'Housing': 30, 'Food': 15, 'Transport': 10, 'Utilities': 5, 'Entertainment': 10, 'Savings': 20, 'Others': 10},
+                    'married': {'Housing': 35, 'Food': 20, 'Transport': 10, 'Utilities': 8, 'Entertainment': 5, 'Savings': 15, 'Others': 7},
+                    'married_with_kids': {'Housing': 35, 'Food': 22, 'Transport': 12, 'Utilities': 8, 'Entertainment': 3, 'Education': 10, 'Savings': 10}
+                } %}
+                {% set current_rec = recommendations.get(profile.family_status, recommendations['single']) %}
+
+                {% set colors = ['primary', 'success', 'info', 'warning', 'danger', 'secondary', 'dark'] %}
+                {% for cat, pct in current_rec.items() %}
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="dot bg-{{ colors[loop.index0 % colors|length] }}"></div>
+                        <span class="small">{{ cat }}</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="progress" style="width:100px;height:8px;">
+                            <div class="progress-bar bg-{{ colors[loop.index0 % colors|length] }}"
+                                 style="width:{{ pct }}%;"></div>
+                        </div>
+                        <span class="small fw-medium" style="width:30px;">{{ pct }}%</span>
+                    </div>
+                </div>
+                {% endfor %}
+
+                {% if profile.monthly_salary and profile.monthly_salary > 0 %}
+                <hr>
+                <p class="text-muted small mb-2">Monthly breakdown at your salary of RM {{ "%.2f"|format(profile.monthly_salary) }}:</p>
+                {% for cat, pct in current_rec.items() %}
+                <div class="d-flex justify-content-between small mb-1">
+                    <span class="text-muted">{{ cat }}</span>
+                    <span class="fw-medium">RM {{ "%.2f"|format(profile.monthly_salary * pct / 100) }}</span>
+                </div>
+                {% endfor %}
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- App Info Card -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-info-circle text-primary me-2"></i>About MoneyMate
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <div class="fs-2">💰</div>
+                    <div>
+                        <h5 class="mb-0">MoneyMate</h5>
+                        <span class="text-muted small">Personal Finance Manager v1.0</span>
+                    </div>
+                </div>
+                <p class="text-muted small mb-3">
+                    Track your income and expenses, set budgets, plan your savings goals,
+                    and project your financial future with the 10-year cash flow planner.
+                </p>
+                <div class="d-flex gap-2 flex-wrap">
+                    <a href="{{ url_for('statements') }}" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-upload me-1"></i>Upload Statement
+                    </a>
+                    <a href="{{ url_for('goals') }}" class="btn btn-sm btn-outline-success">
+                        <i class="bi bi-bullseye me-1"></i>Set Goals
+                    </a>
+                    <a href="{{ url_for('cashflow') }}" class="btn btn-sm btn-outline-info">
+                        <i class="bi bi-graph-up me-1"></i>Plan Cash Flow
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleKidsField(value) {
+    const kidsField = document.getElementById('kidsField');
+    if (value === 'married_with_kids') {
+        kidsField.classList.remove('d-none');
+    } else {
+        kidsField.classList.add('d-none');
+    }
+}
+</script>
+{% endblock %}

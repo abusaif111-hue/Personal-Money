@@ -2,23 +2,33 @@ import re
 import os
 from datetime import datetime
 
+PDF_AVAILABLE = False
+pdfplumber = None
 try:
-    import pdfplumber
-    PDF_AVAILABLE = True
-except ImportError:
-    PDF_AVAILABLE = False
+    import subprocess, sys as _sys
+    _result = subprocess.run(
+        [_sys.executable, '-c', 'import pdfplumber'],
+        capture_output=True, timeout=5
+    )
+    if _result.returncode == 0:
+        import pdfplumber
+        PDF_AVAILABLE = True
+except Exception:
+    pass
 
 try:
     import pandas as pd
     PANDAS_AVAILABLE = True
-except ImportError:
+except Exception:
     PANDAS_AVAILABLE = False
+    pd = None
 
 try:
     from dateutil import parser as dateparser
     DATEUTIL_AVAILABLE = True
-except ImportError:
+except Exception:
     DATEUTIL_AVAILABLE = False
+    dateparser = None
 
 
 CATEGORIES = {
