@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}Bank Statements{% endblock %}
+
+{% block content %}
+<div class="page-header d-flex align-items-center justify-content-between">
+    <div>
+        <h1 class="page-title">Bank Statements</h1>
+        <p class="page-subtitle">Upload and manage your bank statements</p>
+    </div>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+        <i class="bi bi-upload me-2"></i>Upload Statement
+    </button>
+</div>
+
+<!-- Statements Table -->
+<div class="card">
+    <div class="card-body p-0">
+        {% if statements %}
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Bank</th>
+                        <th>Period</th>
+                        <th>Filename</th>
+                        <th class="text-end">Income</th>
+                        <th class="text-end">Expenses</th>
+                        <th class="text-end">Net</th>
+                        <th>Uploaded</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stmt in statements %}
+                    {% set net = stmt.total_income - stmt.total_expenses %}
+                    <tr>
+                        <td>
+                            <span class="fw-semibold">{{ stmt.bank_name }}</span>
+                        </td>
+                        <td>
+                            {% if stmt.statement_month and stmt.statement_year %}
+                                {% set month_name = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] %}
+                                <span class="badge bg-light text-dark border">
+                                    {{ month_name[stmt.statement_month] }} {{ stmt.statement_year }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="text-muted small">
+                                <i class="bi bi-file-earmark me-1"></i>{{ stmt.original_filename }}
+                            </span>
+                        </td>
+                        <td class="text-end text-income fw-semibold">RM {{ "%.2f"|format(stmt.total_income) }}</td>
+                        <td class="text-end text-expense fw-semibold">RM {{ "%.2f"|format(stmt.total_expenses) }}</td>
+                        <td class="text-end fw-bold {% if net >= 0 %}text-income{% else %}text-expense{% endif %}">
+                            RM {{ "%.2f"|format(net) }}
+                        </td>
+                        <td class="text-muted small">{{ stmt.upload_date[:10] if stmt.upload_date else '' }}</td>
+                        <td class="text-center">
+                            <button class="btn btn-sm btn-outline-danger"
+                                    onclick="confirmDelete({{ stmt.id }}, '{{ stmt.original_filename }}')"
+                                    title="Delete statement">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot class="table-light">
+                    <tr>
+                        <td colspan="3" class="fw-bold">Total</td>
+                        <td class="text-end fw-bold text-income">
+                            RM {{ "%.2f"|format(statements|sum(attribute='total_income')) }}
+                        </td>
+                        <td class="text-end fw-bold text-expense">
+                            RM {{ "%.2f"|format(statements|sum(attribute='total_expenses')) }}
+                        </td>
+                        {% set total_net = statements|sum(attribute='total_income') - statements|sum(attribute='total_expenses') %}
+                        <td class="text-end fw-bold {% if total_net >= 0 %}text-income{% else %}text-expense{% endif %}">
+                            RM {{ "%.2f"|format(total_net) }}
+                        </td>
+                        <td colspan="2"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state py-5">
+            <i class="bi bi-file-earmark-text fs-1 text-muted"></i>
+            <h5 class="mt-3 text-muted">No statements uploaded yet</h5>
+            <p class="text-muted">Upload your first bank statement to start tracking your finances.</p>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                <i class="bi bi-upload me-2"></i>Upload Your First Statement
+            </button>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Upload Modal -->
+<div class="modal fade" id="uploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-upload me-2"></i>Upload Bank Statement
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{{ url_for('upload_statement') }}" method="POST" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <!-- Drop Zone -->
+                    <div class="upload-dropzone mb-4" id="dropZone">
+                        <i class="bi bi-cloud-upload fs-1 text-muted"></i>
+                        <p class="mt-2 mb-1 fw-semibold">Drag & drop your file here</p>
+                        <p class="text-muted small mb-3">or click to browse</p>
+                        <input type="file" name="file" id="fileInput" accept=".pdf,.csv" class="d-none" required>
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="document.getElementById('fileInput').click()">
+                            <i class="bi bi-folder2-open me-1"></i>Browse Files
+                        </button>
+                        <p class="text-muted small mt-2">Supported: PDF, CSV</p>
+                    </div>
+                    <div id="selectedFile" class="alert alert-info d-none">
+                        <i class="bi bi-file-earmark-check me-2"></i>
+                        <span id="selectedFileName"></span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">Bank Name</label>
+                        <input type="text" name="bank_name" class="form-control"
+                               placeholder="e.g. Maybank, CIMB, Public Bank" required>
+                    </div>
+
+                    <div class="mb-3" id="pdfPasswordGroup" style="display:none;">
+                        <label class="form-label fw-medium">
+                            PDF Password
+                            <span class="badge bg-secondary ms-1" style="font-size:0.7rem;">Optional</span>
+                        </label>
+                        <div class="input-group">
+                            <input type="password" name="pdf_password" id="pdfPasswordInput"
+                                   class="form-control" placeholder="Enter PDF password if protected"
+                                   autocomplete="off">
+                            <button type="button" class="btn btn-outline-secondary" id="togglePdfPassword"
+                                    onclick="togglePasswordVisibility()">
+                                <i class="bi bi-eye" id="togglePdfIcon"></i>
+                            </button>
+                        </div>
+                        <div class="form-text text-muted">
+                            <i class="bi bi-shield-lock me-1"></i>Used only to unlock the PDF — never stored.
+                        </div>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-6">
+                            <label class="form-label fw-medium">Statement Month</label>
+                            <select name="month" class="form-select">
+                                {% for num, name in months_list %}
+                                    <option value="{{ num }}" {% if num == current_month %}selected{% endif %}>
+                                        {{ name }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-medium">Statement Year</label>
+                            <select name="year" class="form-select">
+                                {% for y in years_list %}
+                                    <option value="{{ y }}" {% if y == current_year %}selected{% endif %}>
+                                        {{ y }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-upload me-2"></i>Upload & Parse
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger">
+                    <i class="bi bi-trash me-2"></i>Delete Statement
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete <strong id="deleteFilename"></strong>?</p>
+                <p class="text-danger small">This will also delete all associated transactions.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <form id="deleteForm" method="POST">
+                    <button type="submit" class="btn btn-danger btn-sm">
+                        <i class="bi bi-trash me-1"></i>Delete
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function confirmDelete(id, filename) {
+    document.getElementById('deleteFilename').textContent = filename;
+    document.getElementById('deleteForm').action = `/statements/${id}/delete`;
+    new bootstrap.Modal(document.getElementById('deleteModal')).show();
+}
+
+// File drag & drop
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('drag-over');
+});
+
+dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        fileInput.files = files;
+        showSelectedFile(files[0].name);
+    }
+});
+
+fileInput.addEventListener('change', e => {
+    if (e.target.files.length > 0) {
+        const name = e.target.files[0].name;
+        showSelectedFile(name);
+        togglePdfPasswordField(name);
+    }
+});
+
+dropZone.addEventListener('drop', e => {
+    // handled above, but also toggle password field
+    const files = e.dataTransfer.files;
+    if (files.length > 0) togglePdfPasswordField(files[0].name);
+});
+
+function showSelectedFile(name) {
+    const selectedFile = document.getElementById('selectedFile');
+    const selectedFileName = document.getElementById('selectedFileName');
+    selectedFileName.textContent = name;
+    selectedFile.classList.remove('d-none');
+}
+
+function togglePdfPasswordField(filename) {
+    const group = document.getElementById('pdfPasswordGroup');
+    const isPdf = filename.toLowerCase().endsWith('.pdf');
+    group.style.display = isPdf ? 'block' : 'none';
+    if (!isPdf) document.getElementById('pdfPasswordInput').value = '';
+}
+
+function togglePasswordVisibility() {
+    const input = document.getElementById('pdfPasswordInput');
+    const icon = document.getElementById('togglePdfIcon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'bi bi-eye-slash';
+    } else {
+        input.type = 'password';
+        icon.className = 'bi bi-eye';
+    }
+}
+</script>
+{% endblock %}
