@@ -1419,14 +1419,13 @@ async function renderStatements() {
             <div class="mb-3">
               <label class="form-label fw-semibold">Statement File (CSV or PDF)</label>
 
-              <!-- iOS-safe: label wraps the input so tapping label opens file picker natively -->
-              <input type="file" id="up-file"
-                     accept=".csv,.pdf,text/csv,application/pdf,application/vnd.ms-excel"
-                     class="d-none" onchange="onFileSelected(this)">
-
-              <label for="up-file" class="btn btn-outline-primary w-100 py-3" style="border-style:dashed;border-width:2px;cursor:pointer;">
+              <!-- Input wrapped inside label — works on all browsers and iOS natively -->
+              <label class="btn btn-outline-primary w-100 py-3 d-block" style="border-style:dashed;border-width:2px;cursor:pointer;font-weight:normal;">
+                <input type="file" id="up-file"
+                       accept=".csv,.pdf,text/csv,application/pdf,application/vnd.ms-excel"
+                       style="display:none;" onchange="onFileSelected(this)">
                 <i class="bi bi-folder2-open fs-4 d-block mb-1"></i>
-                <span>Tap to choose file (CSV or PDF)</span>
+                <span>Click to choose file (CSV or PDF)</span>
               </label>
 
               <div id="file-selected" class="alert alert-success py-2 mt-2 d-none">
@@ -2623,6 +2622,7 @@ window.clearAllData = async function() {
     showAlert('Error clearing data: ' + e.message, 'danger');
   }
 };
+
 </script>
 </body>
 </html>
