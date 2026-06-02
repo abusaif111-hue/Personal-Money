@@ -392,7 +392,7 @@ async function renderDashboard() {
                   <td style="width:90px;" class="text-muted">${formatDate(t.date)}</td>
                   <td class="txn-desc">${escapeHtml(t.description)}</td>
                   <td>${categoryBadge(t.category)}</td>
-                  <td class="text-end fw-600 ${t.type==='income'?'text-income':'text-expense'}" style="white-space:nowrap;">
+                  <td class="text-end fw-semibold ${t.type==='income'?'text-income':'text-expense'}" style="white-space:nowrap;">
                     ${t.type==='income'?'+':'-'}${formatRM(t.amount)}
                   </td>
                 </tr>`).join('')}
@@ -496,9 +496,9 @@ async function renderStatements() {
                 return `<tr>
                   <td><i class="bi bi-bank me-2 text-primary"></i>${escapeHtml(st.bankName||'Unknown')}</td>
                   <td>${getMonthName(st.month)} ${st.year}</td>
-                  <td class="text-income fw-600">${formatRM(st.totalIncome||0)}</td>
-                  <td class="text-expense fw-600">${formatRM(st.totalExpenses||0)}</td>
-                  <td class="fw-600 ${net>=0?'text-income':'text-expense'}">${formatRM(net)}</td>
+                  <td class="text-income fw-semibold">${formatRM(st.totalIncome||0)}</td>
+                  <td class="text-expense fw-semibold">${formatRM(st.totalExpenses||0)}</td>
+                  <td class="fw-semibold ${net>=0?'text-income':'text-expense'}">${formatRM(net)}</td>
                   <td class="text-muted" style="font-size:12px;">${new Date(st.uploadDate).toLocaleDateString('en-MY')}</td>
                   <td>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteStatement(${st.id})">
@@ -508,7 +508,7 @@ async function renderStatements() {
                 </tr>`;
               }).join('')}
             </tbody>
-            <tfoot class="table-light fw-600">
+            <tfoot class="table-light fw-semibold">
               <tr>
                 <td colspan="2">Totals</td>
                 <td class="text-income">${formatRM(totalIncome)}</td>
@@ -536,7 +536,7 @@ async function renderStatements() {
 
     <!-- Upload Modal -->
     <div class="modal fade" id="uploadModal" tabindex="-1">
-      <div class="modal-dialog">
+      <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title"><i class="bi bi-cloud-upload me-2"></i>Upload Bank Statement</h5>
@@ -546,22 +546,22 @@ async function renderStatements() {
             <div id="upload-error" class="alert alert-danger d-none mb-3"></div>
 
             <div class="mb-3">
-              <label class="form-label fw-600">Bank Name</label>
+              <label class="form-label fw-semibold">Bank Name</label>
               <input type="text" class="form-control" id="up-bank" placeholder="e.g. Maybank, CIMB, Public Bank">
             </div>
             <div class="row g-2 mb-3">
               <div class="col-6">
-                <label class="form-label fw-600">Month</label>
+                <label class="form-label fw-semibold">Month</label>
                 <select class="form-select" id="up-month">${monthOpts}</select>
               </div>
               <div class="col-6">
-                <label class="form-label fw-600">Year</label>
+                <label class="form-label fw-semibold">Year</label>
                 <select class="form-select" id="up-year">${yearOpts}</select>
               </div>
             </div>
 
             <div class="mb-3">
-              <label class="form-label fw-600">Statement File (CSV or PDF)</label>
+              <label class="form-label fw-semibold">Statement File (CSV or PDF)</label>
 
               <!-- iOS-safe: label wraps the input so tapping label opens file picker natively -->
               <input type="file" id="up-file"
@@ -575,12 +575,12 @@ async function renderStatements() {
 
               <div id="file-selected" class="alert alert-success py-2 mt-2 d-none">
                 <i class="bi bi-file-earmark-check me-1"></i>
-                <span id="file-name" class="fw-600"></span>
+                <span id="file-name" class="fw-semibold"></span>
               </div>
             </div>
 
             <div class="mb-3 d-none" id="password-field">
-              <label class="form-label fw-600">PDF Password</label>
+              <label class="form-label fw-semibold">PDF Password</label>
               <div class="input-group">
                 <input type="password" class="form-control" id="up-password" placeholder="Enter PDF password">
                 <button class="btn btn-outline-secondary" type="button" onclick="togglePwdVisibility()">
@@ -846,7 +846,7 @@ async function renderTransactions() {
                     ${ALL_CATEGORIES.map(c=>`<option value="${c}" ${c===t.category?'selected':''}>${c}</option>`).join('')}
                   </select>
                 </td>
-                <td class="text-end fw-600 ${t.type==='income'?'text-income':'text-expense'}" style="white-space:nowrap;">
+                <td class="text-end fw-semibold ${t.type==='income'?'text-income':'text-expense'}" style="white-space:nowrap;">
                   ${t.type==='income'?'+':'-'}${formatRM(t.amount)}
                 </td>
               </tr>`).join('')}
@@ -984,7 +984,7 @@ async function renderBudget() {
                         value="${budget > 0 ? budget.toFixed(2) : ''}"
                         placeholder="0.00" min="0" step="0.01">
                     </td>
-                    <td class="${actual>0?'text-expense fw-600':''}">${actual > 0 ? formatRM(actual) : '-'}</td>
+                    <td class="${actual>0?'text-expense fw-semibold':''}">${actual > 0 ? formatRM(actual) : '-'}</td>
                     <td>
                       ${status}
                       ${budget > 0 ? `<div class="progress mt-1" style="height:4px;min-width:60px;">
@@ -1102,7 +1102,7 @@ async function renderGoals() {
           <div class="mb-2">
             <div class="d-flex justify-content-between mb-1">
               <span style="font-size:12px;" class="text-muted">Progress</span>
-              <span style="font-size:12px;" class="fw-600">${progress.toFixed(1)}%</span>
+              <span style="font-size:12px;" class="fw-semibold">${progress.toFixed(1)}%</span>
             </div>
             <div class="progress" style="height:8px;">
               <div class="progress-bar" style="width:${progress}%;background:${barColor};border-radius:10px;transition:width 0.5s;"></div>
@@ -1113,36 +1113,36 @@ async function renderGoals() {
             <div class="row g-1" style="font-size:12px;">
               <div class="col-6">
                 <span class="text-muted">Current</span><br>
-                <span class="fw-600 text-income">${formatRM(g.currentAmount||0)}</span>
+                <span class="fw-semibold text-income">${formatRM(g.currentAmount||0)}</span>
               </div>
               <div class="col-6 text-end">
                 <span class="text-muted">Target</span><br>
-                <span class="fw-600">${formatRM(g.targetAmount||0)}</span>
+                <span class="fw-semibold">${formatRM(g.targetAmount||0)}</span>
               </div>
               ${g.monthlyContribution ? `
               <div class="col-6 mt-1">
                 <span class="text-muted">Monthly</span><br>
-                <span class="fw-600">${formatRM(g.monthlyContribution)}</span>
+                <span class="fw-semibold">${formatRM(g.monthlyContribution)}</span>
               </div>` : ''}
               ${monthsLeft !== null && !achieved ? `
               <div class="col-6 mt-1 text-end">
                 <span class="text-muted">Est. Completion</span><br>
-                <span class="fw-600">${monthsLeft} months</span>
+                <span class="fw-semibold">${monthsLeft} months</span>
               </div>` : ''}
               ${isLoan && g.interestRate ? `
               <div class="col-6 mt-1">
                 <span class="text-muted">Interest Rate</span><br>
-                <span class="fw-600">${g.interestRate}%</span>
+                <span class="fw-semibold">${g.interestRate}%</span>
               </div>` : ''}
               ${isLoan && g.loanBalance ? `
               <div class="col-6 mt-1 text-end">
                 <span class="text-muted">Loan Balance</span><br>
-                <span class="fw-600 text-expense">${formatRM(g.loanBalance)}</span>
+                <span class="fw-semibold text-expense">${formatRM(g.loanBalance)}</span>
               </div>` : ''}
               ${g.targetDate ? `
               <div class="col-12 mt-1">
                 <span class="text-muted">Target Date: </span>
-                <span class="fw-600">${g.targetDate}</span>
+                <span class="fw-semibold">${g.targetDate}</span>
               </div>` : ''}
             </div>
           </div>
@@ -1190,41 +1190,41 @@ async function renderGoals() {
           <div class="modal-body">
             <input type="hidden" id="g-id">
             <div class="mb-3">
-              <label class="form-label fw-600">Goal Name</label>
+              <label class="form-label fw-semibold">Goal Name</label>
               <input type="text" class="form-control" id="g-name" placeholder="e.g. Emergency Fund">
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Type</label>
+              <label class="form-label fw-semibold">Type</label>
               <select class="form-select" id="g-type" onchange="onGoalTypeChange()">${typeOptsHtml}</select>
             </div>
             <div class="row g-2 mb-3">
               <div class="col-6">
-                <label class="form-label fw-600">Target Amount (RM)</label>
+                <label class="form-label fw-semibold">Target Amount (RM)</label>
                 <input type="number" class="form-control" id="g-target" min="0" step="0.01" placeholder="0.00">
               </div>
               <div class="col-6">
-                <label class="form-label fw-600">Current Amount (RM)</label>
+                <label class="form-label fw-semibold">Current Amount (RM)</label>
                 <input type="number" class="form-control" id="g-current" min="0" step="0.01" placeholder="0.00">
               </div>
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Monthly Contribution (RM)</label>
+              <label class="form-label fw-semibold">Monthly Contribution (RM)</label>
               <input type="number" class="form-control" id="g-monthly" min="0" step="0.01" placeholder="0.00">
             </div>
             <div id="loan-fields" class="d-none">
               <div class="row g-2 mb-3">
                 <div class="col-6">
-                  <label class="form-label fw-600">Interest Rate (%)</label>
+                  <label class="form-label fw-semibold">Interest Rate (%)</label>
                   <input type="number" class="form-control" id="g-interest" min="0" step="0.01" placeholder="3.5">
                 </div>
                 <div class="col-6">
-                  <label class="form-label fw-600">Loan Balance (RM)</label>
+                  <label class="form-label fw-semibold">Loan Balance (RM)</label>
                   <input type="number" class="form-control" id="g-loan-balance" min="0" step="0.01" placeholder="0.00">
                 </div>
               </div>
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Target Date (optional)</label>
+              <label class="form-label fw-semibold">Target Date (optional)</label>
               <input type="date" class="form-control" id="g-date">
             </div>
           </div>
@@ -1354,31 +1354,31 @@ async function renderCashflow() {
           <div class="card-header"><span class="card-title">Income &amp; Expense Settings</span></div>
           <div class="card-body">
             <div class="mb-3">
-              <label class="form-label fw-600">Base Monthly Salary (RM)</label>
+              <label class="form-label fw-semibold">Base Monthly Salary (RM)</label>
               <input type="number" class="form-control" id="cf-salary" value="${s.baseMonthlySalary||''}" min="0" step="100" placeholder="5000">
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Annual Salary Increment (%)</label>
+              <label class="form-label fw-semibold">Annual Salary Increment (%)</label>
               <input type="number" class="form-control" id="cf-increment" value="${s.salaryIncrementPct||5}" min="0" step="0.5" placeholder="5">
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Annual Bonus (RM)</label>
+              <label class="form-label fw-semibold">Annual Bonus (RM)</label>
               <input type="number" class="form-control" id="cf-bonus" value="${s.annualBonus||''}" min="0" step="100" placeholder="0">
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">13th Month Salary (RM)</label>
+              <label class="form-label fw-semibold">13th Month Salary (RM)</label>
               <input type="number" class="form-control" id="cf-13th" value="${s.thirteenthMonthSalary||''}" min="0" step="100" placeholder="0">
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Other Monthly Income (RM)</label>
+              <label class="form-label fw-semibold">Other Monthly Income (RM)</label>
               <input type="number" class="form-control" id="cf-other-income" value="${s.otherMonthlyIncome||''}" min="0" step="100" placeholder="0">
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Monthly Expenses (RM)</label>
+              <label class="form-label fw-semibold">Monthly Expenses (RM)</label>
               <input type="number" class="form-control" id="cf-expenses" value="${s.monthlyExpenses||''}" min="0" step="100" placeholder="3000">
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Expense Inflation (%/yr)</label>
+              <label class="form-label fw-semibold">Expense Inflation (%/yr)</label>
               <input type="number" class="form-control" id="cf-inflation" value="${s.expenseInflationPct||3}" min="0" step="0.5" placeholder="3">
             </div>
             <button class="btn btn-primary w-100" onclick="saveCashflowSettings()">
@@ -1452,13 +1452,13 @@ async function renderCashflow() {
                 </thead>
                 <tbody>
                   ${results.map(r => `<tr>
-                    <td class="fw-600">Yr ${r.year}</td>
+                    <td class="fw-semibold">Yr ${r.year}</td>
                     <td>${formatRM(r.monthlySalary)}</td>
                     <td class="text-income">${formatRM(r.annualIncome)}</td>
                     <td class="text-expense">${formatRM(r.annualExpenses)}</td>
                     <td class="text-warning">${r.goalPayments > 0 ? formatRM(r.goalPayments) : '-'}</td>
-                    <td class="fw-600 ${r.netSavings>=0?'text-income':'text-expense'}">${formatRM(r.netSavings)}</td>
-                    <td class="fw-600 ${r.cumulativeSavings>=0?'text-income':'text-expense'}">${formatRM(r.cumulativeSavings)}</td>
+                    <td class="fw-semibold ${r.netSavings>=0?'text-income':'text-expense'}">${formatRM(r.netSavings)}</td>
+                    <td class="fw-semibold ${r.cumulativeSavings>=0?'text-income':'text-expense'}">${formatRM(r.cumulativeSavings)}</td>
                   </tr>`).join('')}
                 </tbody>
               </table>
@@ -1593,11 +1593,11 @@ async function renderProfile() {
           <div class="card-header"><span class="card-title">Personal Details</span></div>
           <div class="card-body">
             <div class="mb-3">
-              <label class="form-label fw-600">Name</label>
+              <label class="form-label fw-semibold">Name</label>
               <input type="text" class="form-control" id="p-name" value="${escapeHtml(profile.name||'')}" placeholder="Your name">
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Family Status</label>
+              <label class="form-label fw-semibold">Family Status</label>
               <select class="form-select" id="p-status">
                 <option value="single"            ${profile.familyStatus==='single'           ?'selected':''}>Single</option>
                 <option value="married"           ${profile.familyStatus==='married'          ?'selected':''}>Married</option>
@@ -1605,7 +1605,7 @@ async function renderProfile() {
               </select>
             </div>
             <div class="mb-3">
-              <label class="form-label fw-600">Number of Kids</label>
+              <label class="form-label fw-semibold">Number of Kids</label>
               <input type="number" class="form-control" id="p-kids" value="${profile.numKids||0}" min="0" max="20">
             </div>
             <button class="btn btn-primary" onclick="saveProfile()">
