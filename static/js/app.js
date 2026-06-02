@@ -1,0 +1,1768 @@
+/**
+ * app.js — MoneyMate SPA Application Logic
+ * Hash-based routing, all pages rendered client-side
+ */
+
+'use strict';
+
+/* ── Global chart store ─────────────────────────────────────── */
+window._charts = {};
+
+/* ── Utility Functions ──────────────────────────────────────── */
+function formatRM(amount) {
+  return 'RM ' + Math.abs(amount).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
+function getMonthName(month) {
+  return ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][month] || '';
+}
+
+function getMonthFullName(month) {
+  return ['','January','February','March','April','May','June','July','August','September','October','November','December'][month] || '';
+}
+
+function getCurrentYearMonth() {
+  const now = new Date();
+  return { month: now.getMonth() + 1, year: now.getFullYear() };
+}
+
+function destroyChart(key) {
+  if (window._charts[key]) {
+    window._charts[key].destroy();
+    delete window._charts[key];
+  }
+}
+
+function showAlert(msg, type = 'success') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const id = 'toast-' + Date.now();
+  const icon = type === 'success' ? 'bi-check-circle-fill' :
+               type === 'danger'  ? 'bi-exclamation-triangle-fill' :
+               type === 'warning' ? 'bi-exclamation-circle-fill' : 'bi-info-circle-fill';
+  const toastEl = document.createElement('div');
+  toastEl.id = id;
+  toastEl.className = `toast align-items-center text-bg-${type} border-0`;
+  toastEl.setAttribute('role', 'alert');
+  toastEl.innerHTML = `
+    <div class="d-flex">
+      <div class="toast-body"><i class="bi ${icon} me-2"></i>${msg}</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>`;
+  container.appendChild(toastEl);
+  const toast = new bootstrap.Toast(toastEl, { delay: 4000 });
+  toast.show();
+  toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+}
+
+function getCategoryClass(cat) {
+  return 'category-' + (cat || 'uncategorized').toLowerCase()
+    .replace(/\s*&\s*/g, '-').replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, '');
+}
+
+function categoryBadge(cat) {
+  return `<span class="category-badge ${getCategoryClass(cat)}">${cat || 'Uncategorized'}</span>`;
+}
+
+function getGoalIcon(type) {
+  const icons = {
+    savings: 'bi-piggy-bank',
+    investment: 'bi-graph-up',
+    emergency_fund: 'bi-shield-check',
+    car_loan: 'bi-car-front',
+    house_loan: 'bi-house',
+    other: 'bi-star'
+  };
+  return icons[type] || 'bi-star';
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* ── Router ─────────────────────────────────────────────────── */
+window.addEventListener('hashchange', router);
+window.addEventListener('load', async () => {
+  // Set topbar date
+  const dateEl = document.getElementById('topbar-date');
+  if (dateEl) {
+    const now = new Date();
+    dateEl.textContent = now.toLocaleDateString('en-MY', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+  }
+
+  // Sidebar toggle
+  const sidebar = document.getElementById('sidebar');
+  const mainContent = document.getElementById('main-content');
+  const toggleBtn = document.getElementById('sidebarToggle');
+  if (toggleBtn && sidebar && mainContent) {
+    toggleBtn.addEventListener('click', () => {
+      sidebar.classList.toggle('collapsed');
+      mainContent.classList.toggle('expanded');
+    });
+  }
+
+  try {
+    await db.init();
+  } catch (e) {
+    console.error('DB init failed:', e);
+    document.getElementById('app').innerHTML = `
+      <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle me-2"></i>
+        Failed to initialise database: ${escapeHtml(e.message)}. Please refresh.
+      </div>`;
+    return;
+  }
+
+  router();
+});
+
+async function router() {
+  const hash = location.hash || '#dashboard';
+  const page = hash.replace('#', '').split('?')[0] || 'dashboard';
+
+  // Update active nav link
+  document.querySelectorAll('.sidebar-nav .nav-link, .sidebar-footer .nav-link').forEach(a => {
+    const pg = a.getAttribute('data-page');
+    a.classList.toggle('active', pg === page);
+  });
+
+  // Update topbar avatar with profile initial
+  try {
+    const profile = await db.get('profile', 1);
+    const avatarEl = document.getElementById('topbar-avatar');
+    if (profile && profile.name && avatarEl) {
+      avatarEl.innerHTML = `<span style="font-size:14px;font-weight:700;">${escapeHtml(profile.name.charAt(0).toUpperCase())}</span>`;
+    }
+  } catch (e) { /* ignore */ }
+
+  const app = document.getElementById('app');
+  app.innerHTML = `<div class="text-center py-5"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading…</span></div></div>`;
+
+  try {
+    switch (page) {
+      case 'dashboard':    await renderDashboard(); break;
+      case 'statements':   await renderStatements(); break;
+      case 'transactions': await renderTransactions(); break;
+      case 'budget':       await renderBudget(); break;
+      case 'goals':        await renderGoals(); break;
+      case 'cashflow':     await renderCashflow(); break;
+      case 'profile':      await renderProfile(); break;
+      default:             await renderDashboard();
+    }
+  } catch (e) {
+    console.error('Render error:', e);
+    app.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>Error loading page: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+/* ── Dashboard ──────────────────────────────────────────────── */
+async function renderDashboard() {
+  const app = document.getElementById('app');
+  const now = getCurrentYearMonth();
+
+  // Parse month/year from hash params
+  const hashParams = new URLSearchParams(location.hash.includes('?') ? location.hash.split('?')[1] : '');
+  const month = parseInt(hashParams.get('month') || now.month);
+  const year  = parseInt(hashParams.get('year')  || now.year);
+
+  // Build month/year options
+  const monthOpts = Array.from({length:12}, (_,i) => {
+    const m = i+1;
+    return `<option value="${m}" ${m===month?'selected':''}>${getMonthFullName(m)}</option>`;
+  }).join('');
+  const yearOpts = Array.from({length:6}, (_,i) => {
+    const y = now.year - 2 + i;
+    return `<option value="${y}" ${y===year?'selected':''}>${y}</option>`;
+  }).join('');
+
+  // Fetch data
+  const [allTxns, profile] = await Promise.all([
+    db.getAll('transactions'),
+    db.get('profile', 1)
+  ]);
+
+  // Filter for selected month/year
+  const monthTxns = allTxns.filter(t => {
+    if (!t.date) return false;
+    const d = new Date(t.date);
+    return d.getFullYear() === year && d.getMonth()+1 === month;
+  });
+
+  const totalIncome   = monthTxns.filter(t => t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const totalExpenses = monthTxns.filter(t => t.type==='expense').reduce((s,t)=>s+t.amount,0);
+  const netSavings    = totalIncome - totalExpenses;
+  const savingsRate   = totalIncome > 0 ? (netSavings/totalIncome*100) : 0;
+
+  // Category spending this month
+  const catSpend = {};
+  monthTxns.filter(t => t.type==='expense').forEach(t => {
+    catSpend[t.category] = (catSpend[t.category]||0) + t.amount;
+  });
+
+  // Last 12 months for bar chart
+  const last12 = [];
+  for (let i = 11; i >= 0; i--) {
+    let m = month - i;
+    let y = year;
+    while (m <= 0) { m += 12; y--; }
+    const inc = allTxns.filter(t => {
+      if (!t.date) return false;
+      const d = new Date(t.date);
+      return d.getFullYear()===y && d.getMonth()+1===m && t.type==='income';
+    }).reduce((s,t)=>s+t.amount,0);
+    const exp = allTxns.filter(t => {
+      if (!t.date) return false;
+      const d = new Date(t.date);
+      return d.getFullYear()===y && d.getMonth()+1===m && t.type==='expense';
+    }).reduce((s,t)=>s+t.amount,0);
+    last12.push({ label: `${getMonthName(m)} ${y}`, income: inc, expense: exp });
+  }
+
+  // Overspending alerts
+  const familyStatus = (profile && profile.familyStatus) || 'single';
+  const recommendations = {
+    single:            { Housing:30, Food:15, Transport:10, Utilities:5, Entertainment:10, Savings:20 },
+    married:           { Housing:35, Food:20, Transport:10, Utilities:8, Entertainment:5, Savings:15 },
+    married_with_kids: { Housing:35, Food:22, Transport:12, Utilities:8, Education:10, Savings:10 }
+  };
+  const rec = recommendations[familyStatus] || recommendations.single;
+
+  const alerts = [];
+  if (totalIncome > 0) {
+    const catMap = { Housing:'Housing', 'Food & Dining':'Food', Transport:'Transport', Utilities:'Utilities', Entertainment:'Entertainment', Education:'Education' };
+    for (const [dbCat, recKey] of Object.entries(catMap)) {
+      if (!rec[recKey]) continue;
+      const spent = catSpend[dbCat] || 0;
+      const pct = spent / totalIncome * 100;
+      if (pct > rec[recKey]) {
+        alerts.push(`<div class="alert alert-warning py-2 mb-2">
+          <i class="bi bi-exclamation-circle me-2"></i>
+          <strong>${dbCat}</strong>: You spent ${pct.toFixed(0)}% of income (recommended max: ${rec[recKey]}%)
+        </div>`);
+      }
+    }
+    const savingsPct = netSavings / totalIncome * 100;
+    if (savingsPct < rec.Savings) {
+      alerts.push(`<div class="alert alert-warning py-2 mb-2">
+        <i class="bi bi-piggy-bank me-2"></i>
+        <strong>Savings</strong>: You saved ${savingsPct.toFixed(0)}% of income (recommended: ${rec.Savings}%)
+      </div>`);
+    }
+  }
+
+  // Recent 10 transactions
+  const recent10 = [...allTxns]
+    .filter(t => t.date)
+    .sort((a,b) => b.date.localeCompare(a.date))
+    .slice(0, 10);
+
+  const netClass = netSavings >= 0 ? 'text-income' : 'text-expense';
+  const rateClass = savingsRate >= 20 ? 'text-income' : savingsRate >= 10 ? 'text-warning' : 'text-expense';
+
+  app.innerHTML = `
+    <div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+      <div>
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-subtitle">Your financial overview for ${getMonthFullName(month)} ${year}</p>
+      </div>
+      <form class="d-flex gap-2 align-items-center" onsubmit="return false;" id="dash-period-form">
+        <select class="form-select form-select-sm" id="dash-month" style="width:130px;">${monthOpts}</select>
+        <select class="form-select form-select-sm" id="dash-year" style="width:90px;">${yearOpts}</select>
+        <button class="btn btn-primary btn-sm" onclick="dashChangePeriod()">Go</button>
+      </form>
+    </div>
+
+    <!-- Stat cards -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="stat-card stat-card-income">
+          <div class="stat-card-icon"><i class="bi bi-arrow-down-circle"></i></div>
+          <div>
+            <div class="stat-label">Total Income</div>
+            <div class="stat-value text-income">${formatRM(totalIncome)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="stat-card stat-card-expense">
+          <div class="stat-card-icon"><i class="bi bi-arrow-up-circle"></i></div>
+          <div>
+            <div class="stat-label">Total Expenses</div>
+            <div class="stat-value text-expense">${formatRM(totalExpenses)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="stat-card stat-card-net">
+          <div class="stat-card-icon"><i class="bi bi-wallet2"></i></div>
+          <div>
+            <div class="stat-label">Net Savings</div>
+            <div class="stat-value ${netClass}">${formatRM(netSavings)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="stat-card stat-card-rate">
+          <div class="stat-card-icon"><i class="bi bi-percent"></i></div>
+          <div>
+            <div class="stat-label">Savings Rate</div>
+            <div class="stat-value ${rateClass}">${savingsRate.toFixed(1)}%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    ${alerts.length ? `<div class="mb-4">${alerts.join('')}</div>` : ''}
+
+    <!-- Charts -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-8">
+        <div class="card chart-card">
+          <div class="card-header"><span class="card-title">Income vs Expenses — Last 12 Months</span></div>
+          <div class="card-body"><canvas id="barChart" height="120"></canvas></div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card chart-card">
+          <div class="card-header"><span class="card-title">Spending by Category</span></div>
+          <div class="card-body d-flex align-items-center justify-content-center">
+            ${Object.keys(catSpend).length ?
+              '<canvas id="doughnutChart" style="max-height:260px;"></canvas>' :
+              '<div class="empty-state"><i class="bi bi-pie-chart text-muted"></i><p class="mt-2 text-muted">No expenses this month</p></div>'
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recommendations -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Spending Recommendations</span>
+            <small class="text-muted ms-2">(${familyStatus.replace(/_/g,' ')})</small>
+          </div>
+          <div class="card-body">
+            ${Object.entries(rec).map(([k,v]) => {
+              const catKey = Object.keys({Housing:'Housing','Food & Dining':'Food',Transport:'Transport',Utilities:'Utilities',Entertainment:'Entertainment',Education:'Education'}).find(c => {
+                const map = {Housing:'Housing','Food & Dining':'Food',Transport:'Transport',Utilities:'Utilities',Entertainment:'Entertainment',Education:'Education'};
+                return map[c] === k;
+              }) || k;
+              const spent = totalIncome > 0 ? ((catSpend[catKey]||0) / totalIncome * 100) : 0;
+              const barColor = spent > v ? '#dc2626' : '#16a34a';
+              return `<div class="recommendation-item mb-3">
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="fw-500" style="font-size:13px;">${k}</span>
+                  <span class="text-muted" style="font-size:12px;">${spent.toFixed(0)}% / ${v}% rec.</span>
+                </div>
+                <div class="progress" style="height:6px;">
+                  <div class="progress-bar" style="width:${Math.min(spent,100)}%;background:${barColor};border-radius:10px;"></div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent transactions -->
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="card-title">Recent Transactions</span>
+            <a href="#transactions" class="btn btn-sm btn-outline-primary">View All</a>
+          </div>
+          <div class="card-body p-0">
+            ${recent10.length ? `
+            <table class="table table-hover mb-0">
+              <tbody>
+                ${recent10.map(t => `
+                <tr>
+                  <td style="width:90px;" class="text-muted">${formatDate(t.date)}</td>
+                  <td class="txn-desc">${escapeHtml(t.description)}</td>
+                  <td>${categoryBadge(t.category)}</td>
+                  <td class="text-end fw-semibold ${t.type==='income'?'text-income':'text-expense'}" style="white-space:nowrap;">
+                    ${t.type==='income'?'+':'-'}${formatRM(t.amount)}
+                  </td>
+                </tr>`).join('')}
+              </tbody>
+            </table>` : `
+            <div class="empty-state">
+              <i class="bi bi-receipt text-muted"></i>
+              <p class="mt-2 text-muted">No transactions yet. <a href="#statements">Upload a bank statement</a></p>
+            </div>`}
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // Bar chart
+  destroyChart('bar');
+  const barCtx = document.getElementById('barChart');
+  if (barCtx) {
+    window._charts['bar'] = new Chart(barCtx, {
+      type: 'bar',
+      data: {
+        labels: last12.map(d => d.label),
+        datasets: [
+          { label: 'Income', data: last12.map(d => d.income), backgroundColor: 'rgba(22,163,74,0.75)', borderRadius: 4 },
+          { label: 'Expenses', data: last12.map(d => d.expense), backgroundColor: 'rgba(220,38,38,0.75)', borderRadius: 4 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true,
+        plugins: { legend: { position: 'top' } },
+        scales: { y: { beginAtZero: true, ticks: { callback: v => 'RM '+v.toLocaleString() } } }
+      }
+    });
+  }
+
+  // Doughnut chart
+  destroyChart('doughnut');
+  const doughCtx = document.getElementById('doughnutChart');
+  if (doughCtx && Object.keys(catSpend).length) {
+    const palette = ['#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316','#6366f1','#84cc16','#06b6d4','#e11d48'];
+    const cats = Object.keys(catSpend);
+    window._charts['doughnut'] = new Chart(doughCtx, {
+      type: 'doughnut',
+      data: {
+        labels: cats,
+        datasets: [{ data: cats.map(c => catSpend[c]), backgroundColor: palette.slice(0, cats.length), borderWidth: 2 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 8 } } }
+      }
+    });
+  }
+}
+
+window.dashChangePeriod = function() {
+  const m = document.getElementById('dash-month').value;
+  const y = document.getElementById('dash-year').value;
+  location.hash = `#dashboard?month=${m}&year=${y}`;
+};
+
+/* ── Bank Statements ────────────────────────────────────────── */
+async function renderStatements() {
+  const app = document.getElementById('app');
+  const statements = await db.getAll('statements');
+
+  // Sort newest first
+  statements.sort((a,b) => new Date(b.uploadDate) - new Date(a.uploadDate));
+
+  const totalIncome   = statements.reduce((s,st)=>s+(st.totalIncome||0),0);
+  const totalExpenses = statements.reduce((s,st)=>s+(st.totalExpenses||0),0);
+
+  const now = getCurrentYearMonth();
+  const monthOpts = Array.from({length:12},(_,i)=>`<option value="${i+1}">${getMonthFullName(i+1)}</option>`).join('');
+  const yearOpts  = Array.from({length:6},(_,i)=>`<option value="${now.year-2+i}">${now.year-2+i}</option>`).join('');
+
+  app.innerHTML = `
+    <div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+      <div>
+        <h1 class="page-title">Bank Statements</h1>
+        <p class="page-subtitle">${statements.length} statement${statements.length!==1?'s':''} uploaded</p>
+      </div>
+      <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+        <i class="bi bi-cloud-upload me-2"></i>Upload Statement
+      </button>
+    </div>
+
+    ${statements.length ? `
+    <div class="card">
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Bank</th><th>Period</th><th>Income</th><th>Expenses</th><th>Net</th><th>Uploaded</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${statements.map(st => {
+                const net = (st.totalIncome||0) - (st.totalExpenses||0);
+                return `<tr>
+                  <td><i class="bi bi-bank me-2 text-primary"></i>${escapeHtml(st.bankName||'Unknown')}</td>
+                  <td>${getMonthName(st.month)} ${st.year}</td>
+                  <td class="text-income fw-semibold">${formatRM(st.totalIncome||0)}</td>
+                  <td class="text-expense fw-semibold">${formatRM(st.totalExpenses||0)}</td>
+                  <td class="fw-semibold ${net>=0?'text-income':'text-expense'}">${formatRM(net)}</td>
+                  <td class="text-muted" style="font-size:12px;">${new Date(st.uploadDate).toLocaleDateString('en-MY')}</td>
+                  <td>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteStatement(${st.id})">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+            <tfoot class="table-light fw-semibold">
+              <tr>
+                <td colspan="2">Totals</td>
+                <td class="text-income">${formatRM(totalIncome)}</td>
+                <td class="text-expense">${formatRM(totalExpenses)}</td>
+                <td class="${totalIncome-totalExpenses>=0?'text-income':'text-expense'}">${formatRM(totalIncome-totalExpenses)}</td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>` : `
+    <div class="card">
+      <div class="card-body">
+        <div class="empty-state">
+          <i class="bi bi-file-earmark-text text-muted"></i>
+          <h5 class="mt-3">No statements yet</h5>
+          <p class="text-muted">Upload your first bank statement to get started.</p>
+          <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+            <i class="bi bi-cloud-upload me-2"></i>Upload Statement
+          </button>
+        </div>
+      </div>
+    </div>`}
+
+    <!-- Upload Modal -->
+    <div class="modal fade" id="uploadModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title"><i class="bi bi-cloud-upload me-2"></i>Upload Bank Statement</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div id="upload-error" class="alert alert-danger d-none mb-3"></div>
+
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Bank Name</label>
+              <input type="text" class="form-control" id="up-bank" placeholder="e.g. Maybank, CIMB, Public Bank">
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label class="form-label fw-semibold">Month</label>
+                <select class="form-select" id="up-month">${monthOpts}</select>
+              </div>
+              <div class="col-6">
+                <label class="form-label fw-semibold">Year</label>
+                <select class="form-select" id="up-year">${yearOpts}</select>
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Statement File (CSV or PDF)</label>
+
+              <!-- Input wrapped inside label — works on all browsers and iOS natively -->
+              <label class="btn btn-outline-primary w-100 py-3 d-block" style="border-style:dashed;border-width:2px;cursor:pointer;font-weight:normal;">
+                <input type="file" id="up-file"
+                       accept=".csv,.pdf,text/csv,application/pdf,application/vnd.ms-excel"
+                       style="display:none;" onchange="onFileSelected(this)">
+                <i class="bi bi-folder2-open fs-4 d-block mb-1"></i>
+                <span>Click to choose file (CSV or PDF)</span>
+              </label>
+
+              <div id="file-selected" class="alert alert-success py-2 mt-2 d-none">
+                <i class="bi bi-file-earmark-check me-1"></i>
+                <span id="file-name" class="fw-semibold"></span>
+              </div>
+            </div>
+
+            <div class="mb-3 d-none" id="password-field">
+              <label class="form-label fw-semibold">PDF Password</label>
+              <div class="input-group">
+                <input type="password" class="form-control" id="up-password" placeholder="Enter PDF password">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePwdVisibility()">
+                  <i class="bi bi-eye" id="pwd-eye-icon"></i>
+                </button>
+              </div>
+              <div id="pwd-error" class="text-danger mt-1 d-none" style="font-size:12px;">Incorrect password. Please try again.</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-primary" id="up-btn" onclick="uploadStatement()">
+              <span id="up-btn-text"><i class="bi bi-upload me-1"></i>Upload &amp; Parse</span>
+              <span id="up-btn-spinner" class="d-none"><span class="spinner-border spinner-border-sm me-1"></span>Parsing…</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // Dropzone drag events
+  const dropzone = document.getElementById('dropzone');
+  if (dropzone) {
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        document.getElementById('up-file').files = e.dataTransfer.files;
+        onFileSelected({ files: [file] });
+      }
+    });
+  }
+
+  // Pre-select current month/year
+  const mSel = document.getElementById('up-month');
+  const ySel = document.getElementById('up-year');
+  if (mSel) mSel.value = now.month;
+  if (ySel) ySel.value = now.year;
+}
+
+window.onFileSelected = function(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('file-name').textContent = file.name;
+  document.getElementById('file-selected').classList.remove('d-none');
+  const isPDF = file.name.toLowerCase().endsWith('.pdf');
+  document.getElementById('password-field').classList.toggle('d-none', !isPDF);
+  document.getElementById('pwd-error').classList.add('d-none');
+};
+
+window.togglePwdVisibility = function() {
+  const inp = document.getElementById('up-password');
+  const icon = document.getElementById('pwd-eye-icon');
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    icon.className = 'bi bi-eye-slash';
+  } else {
+    inp.type = 'password';
+    icon.className = 'bi bi-eye';
+  }
+};
+
+window.uploadStatement = async function() {
+  const fileInput = document.getElementById('up-file');
+  const file = fileInput.files[0];
+  if (!file) { showAlert('Please select a file.', 'warning'); return; }
+
+  const bankName = (document.getElementById('up-bank').value || '').trim() || 'Unknown Bank';
+  const month    = parseInt(document.getElementById('up-month').value);
+  const year     = parseInt(document.getElementById('up-year').value);
+  const password = document.getElementById('up-password').value || '';
+
+  const btn        = document.getElementById('up-btn');
+  const btnText    = document.getElementById('up-btn-text');
+  const btnSpinner = document.getElementById('up-btn-spinner');
+  const errDiv     = document.getElementById('upload-error');
+  const pwdErr     = document.getElementById('pwd-error');
+
+  btn.disabled = true;
+  btnText.classList.add('d-none');
+  btnSpinner.classList.remove('d-none');
+  errDiv.classList.add('d-none');
+  pwdErr.classList.add('d-none');
+
+  try {
+    let result = await parseStatement(file, password);
+
+    if (result && result.needsPassword) {
+      document.getElementById('password-field').classList.remove('d-none');
+      document.getElementById('up-password').focus();
+      errDiv.textContent = 'This PDF is password-protected. Please enter the password.';
+      errDiv.classList.remove('d-none');
+      return;
+    }
+
+    if (result && result.wrongPassword) {
+      pwdErr.classList.remove('d-none');
+      document.getElementById('up-password').focus();
+      return;
+    }
+
+    const transactions = Array.isArray(result) ? result : [];
+    const totalIncome   = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+    const totalExpenses = transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+
+    // Save statement
+    const stId = await db.add('statements', {
+      filename: file.name,
+      bankName,
+      month,
+      year,
+      totalIncome,
+      totalExpenses,
+      uploadDate: new Date().toISOString()
+    });
+
+    // Save transactions with statementId and month field
+    const txnsToSave = transactions.map(t => ({
+      ...t,
+      statementId: stId,
+      month: t.date ? parseInt(t.date.split('-')[1]) : month,
+      year: t.date ? parseInt(t.date.split('-')[0]) : year
+    }));
+
+    if (txnsToSave.length > 0) {
+      await db.addBulk('transactions', txnsToSave);
+    }
+
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('uploadModal'));
+    if (modal) modal.hide();
+
+    showAlert(`Uploaded successfully! Found ${transactions.length} transaction${transactions.length!==1?'s':''}.`);
+    await renderStatements();
+
+  } catch (e) {
+    console.error('Upload error:', e);
+    errDiv.textContent = 'Error parsing file: ' + e.message;
+    errDiv.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
+    btnText.classList.remove('d-none');
+    btnSpinner.classList.add('d-none');
+  }
+};
+
+window.deleteStatement = async function(id) {
+  if (!confirm('Delete this statement and all its transactions?')) return;
+  try {
+    // Delete transactions for this statement
+    const txns = await db.getAllByIndex('transactions', 'statementId', id);
+    for (const t of txns) {
+      await db.delete('transactions', t.id);
+    }
+    await db.delete('statements', id);
+
+    // Recalculate statement totals (they're already deleted) and re-render
+    showAlert('Statement deleted.');
+    await renderStatements();
+  } catch (e) {
+    showAlert('Error deleting statement: ' + e.message, 'danger');
+  }
+};
+
+/* ── Transactions ───────────────────────────────────────────── */
+async function renderTransactions() {
+  const app = document.getElementById('app');
+  const now = getCurrentYearMonth();
+
+  const hashParams = new URLSearchParams(location.hash.includes('?') ? location.hash.split('?')[1] : '');
+  const filterMonth = parseInt(hashParams.get('month') || 0);
+  const filterYear  = parseInt(hashParams.get('year')  || now.year);
+  const filterCat   = hashParams.get('cat') || '';
+  const filterType  = hashParams.get('type') || '';
+
+  const allTxns = await db.getAll('transactions');
+
+  // Filter
+  const filtered = allTxns.filter(t => {
+    if (!t.date) return false;
+    const d = new Date(t.date);
+    const y = d.getFullYear();
+    const m = d.getMonth()+1;
+    if (filterMonth && m !== filterMonth) return false;
+    if (filterYear  && y !== filterYear)  return false;
+    if (filterCat   && t.category !== filterCat) return false;
+    if (filterType  && t.type !== filterType) return false;
+    return true;
+  }).sort((a,b) => b.date.localeCompare(a.date));
+
+  const monthOpts = `<option value="0">All Months</option>` +
+    Array.from({length:12},(_,i)=>`<option value="${i+1}" ${filterMonth===i+1?'selected':''}>${getMonthFullName(i+1)}</option>`).join('');
+
+  const availYears = [...new Set(allTxns.map(t=>t.date?new Date(t.date).getFullYear():now.year))].sort((a,b)=>b-a);
+  if (!availYears.includes(now.year)) availYears.unshift(now.year);
+  const yearOpts = availYears.map(y=>`<option value="${y}" ${filterYear===y?'selected':''}>${y}</option>`).join('');
+
+  const catSet = [...new Set(allTxns.map(t=>t.category).filter(Boolean))].sort();
+  const catOpts = `<option value="">All Categories</option>` +
+    catSet.map(c=>`<option value="${c}" ${filterCat===c?'selected':''}>${c}</option>`).join('');
+
+  app.innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Transactions</h1>
+      <p class="page-subtitle">${filtered.length} transaction${filtered.length!==1?'s':''} found</p>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body py-2">
+        <form class="row g-2 align-items-end" onsubmit="return false;" id="txn-filter-form">
+          <div class="col-6 col-sm-3 col-md-2">
+            <label class="form-label mb-1" style="font-size:12px;">Month</label>
+            <select class="form-select form-select-sm" id="f-month">${monthOpts}</select>
+          </div>
+          <div class="col-6 col-sm-3 col-md-2">
+            <label class="form-label mb-1" style="font-size:12px;">Year</label>
+            <select class="form-select form-select-sm" id="f-year">${yearOpts}</select>
+          </div>
+          <div class="col-6 col-sm-3 col-md-3">
+            <label class="form-label mb-1" style="font-size:12px;">Category</label>
+            <select class="form-select form-select-sm" id="f-cat">${catOpts}</select>
+          </div>
+          <div class="col-6 col-sm-3 col-md-2">
+            <label class="form-label mb-1" style="font-size:12px;">Type</label>
+            <select class="form-select form-select-sm" id="f-type">
+              <option value="">All</option>
+              <option value="income" ${filterType==='income'?'selected':''}>Income</option>
+              <option value="expense" ${filterType==='expense'?'selected':''}>Expense</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3 d-flex gap-2">
+            <button class="btn btn-primary btn-sm" onclick="applyTxnFilter()">
+              <i class="bi bi-funnel me-1"></i>Apply
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="clearTxnFilter()">Clear</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body p-0">
+        ${filtered.length ? `
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Date</th><th>Description</th><th>Category</th><th class="text-end">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filtered.map(t => `
+              <tr>
+                <td style="white-space:nowrap;width:100px;">${formatDate(t.date)}</td>
+                <td class="txn-desc">${escapeHtml(t.description)}</td>
+                <td>
+                  <select class="form-select form-select-sm category-select"
+                    style="font-size:11px;padding:2px 6px;border-radius:20px;min-width:130px;"
+                    data-txn-id="${t.id}" onchange="updateTxnCategory(this)">
+                    ${ALL_CATEGORIES.map(c=>`<option value="${c}" ${c===t.category?'selected':''}>${c}</option>`).join('')}
+                  </select>
+                </td>
+                <td class="text-end fw-semibold ${t.type==='income'?'text-income':'text-expense'}" style="white-space:nowrap;">
+                  ${t.type==='income'?'+':'-'}${formatRM(t.amount)}
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : `
+        <div class="empty-state">
+          <i class="bi bi-search text-muted"></i>
+          <h5 class="mt-3">No transactions found</h5>
+          <p class="text-muted">Try adjusting your filters or <a href="#statements">upload a statement</a>.</p>
+        </div>`}
+      </div>
+    </div>`;
+}
+
+window.applyTxnFilter = function() {
+  const m    = document.getElementById('f-month').value;
+  const y    = document.getElementById('f-year').value;
+  const cat  = document.getElementById('f-cat').value;
+  const type = document.getElementById('f-type').value;
+  const params = new URLSearchParams();
+  if (m)    params.set('month', m);
+  if (y)    params.set('year', y);
+  if (cat)  params.set('cat', cat);
+  if (type) params.set('type', type);
+  location.hash = '#transactions?' + params.toString();
+};
+
+window.clearTxnFilter = function() {
+  location.hash = '#transactions';
+};
+
+window.updateTxnCategory = async function(sel) {
+  const txnId = parseInt(sel.getAttribute('data-txn-id'));
+  const newCat = sel.value;
+  try {
+    const txn = await db.get('transactions', txnId);
+    if (txn) {
+      txn.category = newCat;
+      // Also update type if category is income-like
+      if (newCat === 'Salary' || newCat === 'Income') txn.type = 'income';
+      else if (txn.type === 'income' && newCat !== 'Salary' && newCat !== 'Income') {
+        // Don't auto-change type from income to expense on category change alone
+      }
+      await db.update('transactions', txn);
+    }
+  } catch (e) {
+    showAlert('Error updating category: ' + e.message, 'danger');
+  }
+};
+
+/* ── Budget & Analysis ──────────────────────────────────────── */
+async function renderBudget() {
+  const app = document.getElementById('app');
+  const now = getCurrentYearMonth();
+
+  const hashParams = new URLSearchParams(location.hash.includes('?') ? location.hash.split('?')[1] : '');
+  const month = parseInt(hashParams.get('month') || now.month);
+  const year  = parseInt(hashParams.get('year')  || now.year);
+
+  const [allTxns, allBudgets] = await Promise.all([
+    db.getAll('transactions'),
+    db.getAll('budgets')
+  ]);
+
+  // Filter transactions for this month/year
+  const monthTxns = allTxns.filter(t => {
+    if (!t.date || t.type !== 'expense') return false;
+    const d = new Date(t.date);
+    return d.getFullYear()===year && d.getMonth()+1===month;
+  });
+
+  // Calculate spending per category
+  const catSpend = {};
+  monthTxns.forEach(t => {
+    catSpend[t.category] = (catSpend[t.category]||0) + t.amount;
+  });
+
+  // Get existing budgets for this month/year
+  const budgetMap = {};
+  allBudgets.filter(b => b.month===month && b.year===year).forEach(b => {
+    budgetMap[b.category] = b;
+  });
+
+  const expenseCategories = ['Food & Dining','Transport','Utilities','Shopping','Healthcare','Education','Entertainment','Housing','Insurance','Loan Payment','Uncategorized'];
+  const allCatsWithData = [...new Set([...expenseCategories, ...Object.keys(catSpend)])];
+
+  const monthOpts = Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===month?'selected':''}>${getMonthFullName(i+1)}</option>`).join('');
+  const yearOpts  = Array.from({length:6},(_,i)=>`<option value="${now.year-2+i}" ${now.year-2+i===year?'selected':''}>${now.year-2+i}</option>`).join('');
+
+  app.innerHTML = `
+    <div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+      <div>
+        <h1 class="page-title">Budget &amp; Analysis</h1>
+        <p class="page-subtitle">${getMonthFullName(month)} ${year}</p>
+      </div>
+      <form class="d-flex gap-2" onsubmit="return false;">
+        <select class="form-select form-select-sm" id="bud-month" style="width:130px;">${monthOpts}</select>
+        <select class="form-select form-select-sm" id="bud-year"  style="width:90px;">${yearOpts}</select>
+        <button class="btn btn-primary btn-sm" onclick="budChangePeriod()">Go</button>
+      </form>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-7">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="card-title">Budget vs Actual</span>
+            <button class="btn btn-sm btn-primary" onclick="saveBudgets(${month},${year})">
+              <i class="bi bi-save me-1"></i>Save Budgets
+            </button>
+          </div>
+          <div class="card-body p-0">
+            <table class="table mb-0">
+              <thead>
+                <tr>
+                  <th>Category</th><th>Budget (RM)</th><th>Actual</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${allCatsWithData.map(cat => {
+                  const actual  = catSpend[cat] || 0;
+                  const budget  = budgetMap[cat] ? budgetMap[cat].monthlyLimit : 0;
+                  const pct     = budget > 0 ? Math.min(actual/budget*100, 100) : 0;
+                  const barColor = budget > 0 && actual > budget ? '#dc2626' : budget > 0 && actual > budget*0.8 ? '#f59e0b' : '#16a34a';
+                  const status  = budget === 0 ? `<span class="badge bg-secondary">No Budget</span>` :
+                                  actual > budget ? `<span class="badge bg-danger">Over Budget</span>` :
+                                  `<span class="badge bg-success">On Track</span>`;
+                  return `<tr>
+                    <td>${categoryBadge(cat)}</td>
+                    <td style="width:140px;">
+                      <input type="number" class="form-control form-control-sm budget-input"
+                        id="bud-${cat.replace(/\s/g,'_').replace(/&/g,'_')}"
+                        data-cat="${escapeHtml(cat)}"
+                        value="${budget > 0 ? budget.toFixed(2) : ''}"
+                        placeholder="0.00" min="0" step="0.01">
+                    </td>
+                    <td class="${actual>0?'text-expense fw-semibold':''}">${actual > 0 ? formatRM(actual) : '-'}</td>
+                    <td>
+                      ${status}
+                      ${budget > 0 ? `<div class="progress mt-1" style="height:4px;min-width:60px;">
+                        <div class="progress-bar" style="width:${pct}%;background:${barColor};border-radius:10px;"></div>
+                      </div>` : ''}
+                    </td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-5">
+        <div class="card chart-card">
+          <div class="card-header"><span class="card-title">Budget vs Actual Chart</span></div>
+          <div class="card-body">
+            <canvas id="budgetChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // Render budget bar chart
+  destroyChart('budget');
+  const budCtx = document.getElementById('budgetChart');
+  if (budCtx) {
+    const chartCats = allCatsWithData.filter(c => (catSpend[c]||0) > 0 || (budgetMap[c] && budgetMap[c].monthlyLimit > 0));
+    window._charts['budget'] = new Chart(budCtx, {
+      type: 'bar',
+      data: {
+        labels: chartCats,
+        datasets: [
+          { label: 'Budget', data: chartCats.map(c => budgetMap[c]?.monthlyLimit||0), backgroundColor: 'rgba(59,130,246,0.5)', borderRadius: 4 },
+          { label: 'Actual', data: chartCats.map(c => catSpend[c]||0), backgroundColor: 'rgba(220,38,38,0.7)', borderRadius: 4 }
+        ]
+      },
+      options: {
+        responsive: true, indexAxis: 'y',
+        plugins: { legend: { position: 'top' } },
+        scales: { x: { beginAtZero: true, ticks: { callback: v => 'RM'+v.toLocaleString() } } }
+      }
+    });
+  }
+}
+
+window.budChangePeriod = function() {
+  const m = document.getElementById('bud-month').value;
+  const y = document.getElementById('bud-year').value;
+  location.hash = `#budget?month=${m}&year=${y}`;
+};
+
+window.saveBudgets = async function(month, year) {
+  const inputs = document.querySelectorAll('.budget-input');
+  const allBudgets = await db.getAll('budgets');
+
+  for (const inp of inputs) {
+    const cat   = inp.getAttribute('data-cat');
+    const limit = parseFloat(inp.value) || 0;
+    if (limit <= 0 && !inp.value.trim()) continue; // skip empty
+
+    // Find existing budget
+    const existing = allBudgets.find(b => b.category===cat && b.month===month && b.year===year);
+    if (existing) {
+      await db.update('budgets', { ...existing, monthlyLimit: limit });
+    } else {
+      await db.add('budgets', { category: cat, monthlyLimit: limit, month, year });
+    }
+  }
+  showAlert('Budgets saved!');
+};
+
+/* ── Goals ──────────────────────────────────────────────────── */
+async function renderGoals() {
+  const app = document.getElementById('app');
+  const goals = await db.getAll('goals');
+
+  const typeOptions = [
+    ['savings','Savings'],['investment','Investment'],['emergency_fund','Emergency Fund'],
+    ['car_loan','Car Loan'],['house_loan','House Loan'],['other','Other']
+  ];
+  const typeOptsHtml = typeOptions.map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+
+  function goalCard(g) {
+    const progress = g.targetAmount > 0 ? Math.min((g.currentAmount||0)/g.targetAmount*100, 100) : 0;
+    const remaining = (g.targetAmount||0) - (g.currentAmount||0);
+    const monthsLeft = (g.monthlyContribution||0) > 0 ? Math.ceil(remaining/(g.monthlyContribution)) : null;
+    const achieved = progress >= 100;
+    const isLoan = g.type === 'car_loan' || g.type === 'house_loan';
+    const typeLabel = typeOptions.find(([v])=>v===g.type)?.[1] || g.type;
+    const barColor = achieved ? '#16a34a' : progress > 75 ? '#3b82f6' : progress > 50 ? '#f59e0b' : '#94a3b8';
+
+    return `<div class="col-sm-6 col-xl-4">
+      <div class="card goal-card h-100">
+        <div class="card-body">
+          <div class="d-flex align-items-start justify-content-between mb-3">
+            <div class="d-flex align-items-center gap-2">
+              <div class="goal-icon goal-icon-${g.type}">
+                <i class="bi ${getGoalIcon(g.type)}"></i>
+              </div>
+              <div>
+                <h6 class="mb-0 fw-700">${escapeHtml(g.name)}</h6>
+                <span class="badge bg-light text-muted" style="font-size:10px;">${typeLabel}</span>
+              </div>
+            </div>
+            <div class="d-flex gap-1">
+              <button class="btn btn-sm btn-outline-primary" onclick="editGoal(${g.id})"><i class="bi bi-pencil"></i></button>
+              <button class="btn btn-sm btn-outline-danger"  onclick="deleteGoal(${g.id})"><i class="bi bi-trash"></i></button>
+            </div>
+          </div>
+
+          ${achieved ? '<div class="alert alert-success py-1 px-2 mb-2" style="font-size:12px;"><i class="bi bi-trophy-fill me-1"></i>Goal Achieved! 🏆</div>' : ''}
+
+          <div class="mb-2">
+            <div class="d-flex justify-content-between mb-1">
+              <span style="font-size:12px;" class="text-muted">Progress</span>
+              <span style="font-size:12px;" class="fw-semibold">${progress.toFixed(1)}%</span>
+            </div>
+            <div class="progress" style="height:8px;">
+              <div class="progress-bar" style="width:${progress}%;background:${barColor};border-radius:10px;transition:width 0.5s;"></div>
+            </div>
+          </div>
+
+          <div class="goal-details">
+            <div class="row g-1" style="font-size:12px;">
+              <div class="col-6">
+                <span class="text-muted">Current</span><br>
+                <span class="fw-semibold text-income">${formatRM(g.currentAmount||0)}</span>
+              </div>
+              <div class="col-6 text-end">
+                <span class="text-muted">Target</span><br>
+                <span class="fw-semibold">${formatRM(g.targetAmount||0)}</span>
+              </div>
+              ${g.monthlyContribution ? `
+              <div class="col-6 mt-1">
+                <span class="text-muted">Monthly</span><br>
+                <span class="fw-semibold">${formatRM(g.monthlyContribution)}</span>
+              </div>` : ''}
+              ${monthsLeft !== null && !achieved ? `
+              <div class="col-6 mt-1 text-end">
+                <span class="text-muted">Est. Completion</span><br>
+                <span class="fw-semibold">${monthsLeft} months</span>
+              </div>` : ''}
+              ${isLoan && g.interestRate ? `
+              <div class="col-6 mt-1">
+                <span class="text-muted">Interest Rate</span><br>
+                <span class="fw-semibold">${g.interestRate}%</span>
+              </div>` : ''}
+              ${isLoan && g.loanBalance ? `
+              <div class="col-6 mt-1 text-end">
+                <span class="text-muted">Loan Balance</span><br>
+                <span class="fw-semibold text-expense">${formatRM(g.loanBalance)}</span>
+              </div>` : ''}
+              ${g.targetDate ? `
+              <div class="col-12 mt-1">
+                <span class="text-muted">Target Date: </span>
+                <span class="fw-semibold">${g.targetDate}</span>
+              </div>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  app.innerHTML = `
+    <div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+      <div>
+        <h1 class="page-title">Goals</h1>
+        <p class="page-subtitle">${goals.length} goal${goals.length!==1?'s':''} tracked</p>
+      </div>
+      <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#goalModal" onclick="openAddGoal()">
+        <i class="bi bi-plus-circle me-2"></i>Add Goal
+      </button>
+    </div>
+
+    ${goals.length ? `
+    <div class="row g-3">
+      ${goals.map(g => goalCard(g)).join('')}
+    </div>` : `
+    <div class="card">
+      <div class="card-body">
+        <div class="empty-state">
+          <i class="bi bi-trophy text-muted"></i>
+          <h5 class="mt-3">No goals yet</h5>
+          <p class="text-muted">Set a financial goal to start tracking your progress.</p>
+          <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#goalModal" onclick="openAddGoal()">
+            <i class="bi bi-plus-circle me-2"></i>Add Your First Goal
+          </button>
+        </div>
+      </div>
+    </div>`}
+
+    <!-- Goal Modal -->
+    <div class="modal fade" id="goalModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="goal-modal-title">Add Goal</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="g-id">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Goal Name</label>
+              <input type="text" class="form-control" id="g-name" placeholder="e.g. Emergency Fund">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Type</label>
+              <select class="form-select" id="g-type" onchange="onGoalTypeChange()">${typeOptsHtml}</select>
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label class="form-label fw-semibold">Target Amount (RM)</label>
+                <input type="number" class="form-control" id="g-target" min="0" step="0.01" placeholder="0.00">
+              </div>
+              <div class="col-6">
+                <label class="form-label fw-semibold">Current Amount (RM)</label>
+                <input type="number" class="form-control" id="g-current" min="0" step="0.01" placeholder="0.00">
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Monthly Contribution (RM)</label>
+              <input type="number" class="form-control" id="g-monthly" min="0" step="0.01" placeholder="0.00">
+            </div>
+            <div id="loan-fields" class="d-none">
+              <div class="row g-2 mb-3">
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Interest Rate (%)</label>
+                  <input type="number" class="form-control" id="g-interest" min="0" step="0.01" placeholder="3.5">
+                </div>
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Loan Balance (RM)</label>
+                  <input type="number" class="form-control" id="g-loan-balance" min="0" step="0.01" placeholder="0.00">
+                </div>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Target Date (optional)</label>
+              <input type="date" class="form-control" id="g-date">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveGoal()">
+              <i class="bi bi-save me-1"></i>Save Goal
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+window.onGoalTypeChange = function() {
+  const type = document.getElementById('g-type').value;
+  const isLoan = type === 'car_loan' || type === 'house_loan';
+  document.getElementById('loan-fields').classList.toggle('d-none', !isLoan);
+};
+
+window.openAddGoal = function() {
+  document.getElementById('goal-modal-title').textContent = 'Add Goal';
+  document.getElementById('g-id').value = '';
+  document.getElementById('g-name').value = '';
+  document.getElementById('g-type').value = 'savings';
+  document.getElementById('g-target').value = '';
+  document.getElementById('g-current').value = '';
+  document.getElementById('g-monthly').value = '';
+  document.getElementById('g-interest').value = '';
+  document.getElementById('g-loan-balance').value = '';
+  document.getElementById('g-date').value = '';
+  document.getElementById('loan-fields').classList.add('d-none');
+};
+
+window.editGoal = async function(id) {
+  const g = await db.get('goals', id);
+  if (!g) return;
+  document.getElementById('goal-modal-title').textContent = 'Edit Goal';
+  document.getElementById('g-id').value = g.id;
+  document.getElementById('g-name').value = g.name || '';
+  document.getElementById('g-type').value = g.type || 'savings';
+  document.getElementById('g-target').value = g.targetAmount || '';
+  document.getElementById('g-current').value = g.currentAmount || '';
+  document.getElementById('g-monthly').value = g.monthlyContribution || '';
+  document.getElementById('g-interest').value = g.interestRate || '';
+  document.getElementById('g-loan-balance').value = g.loanBalance || '';
+  document.getElementById('g-date').value = g.targetDate || '';
+  const isLoan = g.type === 'car_loan' || g.type === 'house_loan';
+  document.getElementById('loan-fields').classList.toggle('d-none', !isLoan);
+
+  const modal = new bootstrap.Modal(document.getElementById('goalModal'));
+  modal.show();
+};
+
+window.saveGoal = async function() {
+  const name = document.getElementById('g-name').value.trim();
+  if (!name) { showAlert('Please enter a goal name.', 'warning'); return; }
+
+  const goalData = {
+    name,
+    type: document.getElementById('g-type').value,
+    targetAmount: parseFloat(document.getElementById('g-target').value) || 0,
+    currentAmount: parseFloat(document.getElementById('g-current').value) || 0,
+    monthlyContribution: parseFloat(document.getElementById('g-monthly').value) || 0,
+    interestRate: parseFloat(document.getElementById('g-interest').value) || 0,
+    loanBalance: parseFloat(document.getElementById('g-loan-balance').value) || 0,
+    targetDate: document.getElementById('g-date').value || '',
+    createdAt: new Date().toISOString()
+  };
+
+  try {
+    const existingId = document.getElementById('g-id').value;
+    if (existingId) {
+      await db.update('goals', { ...goalData, id: parseInt(existingId) });
+      showAlert('Goal updated!');
+    } else {
+      await db.add('goals', goalData);
+      showAlert('Goal added!');
+    }
+    const modal = bootstrap.Modal.getInstance(document.getElementById('goalModal'));
+    if (modal) modal.hide();
+    await renderGoals();
+  } catch (e) {
+    showAlert('Error saving goal: ' + e.message, 'danger');
+  }
+};
+
+window.deleteGoal = async function(id) {
+  if (!confirm('Delete this goal?')) return;
+  try {
+    await db.delete('goals', id);
+    showAlert('Goal deleted.');
+    await renderGoals();
+  } catch (e) {
+    showAlert('Error deleting goal: ' + e.message, 'danger');
+  }
+};
+
+/* ── Cash Flow Planner ──────────────────────────────────────── */
+async function renderCashflow() {
+  const app = document.getElementById('app');
+  const [cfSettings, extraIncomes, goals] = await Promise.all([
+    db.get('cashflowSettings', 1),
+    db.getAll('extraIncomes'),
+    db.getAll('goals')
+  ]);
+
+  const s = cfSettings || {
+    baseMonthlySalary: 0, salaryIncrementPct: 5, annualBonus: 0, thirteenthMonthSalary: 0,
+    otherMonthlyIncome: 0, monthlyExpenses: 0, expenseInflationPct: 3
+  };
+
+  const results = calculateCashflow(s, extraIncomes, goals);
+
+  function freqLabel(f) { return f==='monthly'?'Monthly':f==='annual'?'Annual':'One-Time'; }
+
+  app.innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Cash Flow Planner</h1>
+      <p class="page-subtitle">10-year financial projection</p>
+    </div>
+
+    <div class="row g-3">
+      <!-- Settings panel -->
+      <div class="col-md-5 col-lg-4">
+        <div class="card mb-3">
+          <div class="card-header"><span class="card-title">Income &amp; Expense Settings</span></div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Base Monthly Salary (RM)</label>
+              <input type="number" class="form-control" id="cf-salary" value="${s.baseMonthlySalary||''}" min="0" step="100" placeholder="5000">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Annual Salary Increment (%)</label>
+              <input type="number" class="form-control" id="cf-increment" value="${s.salaryIncrementPct||5}" min="0" step="0.5" placeholder="5">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Annual Bonus (RM)</label>
+              <input type="number" class="form-control" id="cf-bonus" value="${s.annualBonus||''}" min="0" step="100" placeholder="0">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">13th Month Salary (RM)</label>
+              <input type="number" class="form-control" id="cf-13th" value="${s.thirteenthMonthSalary||''}" min="0" step="100" placeholder="0">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Other Monthly Income (RM)</label>
+              <input type="number" class="form-control" id="cf-other-income" value="${s.otherMonthlyIncome||''}" min="0" step="100" placeholder="0">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Monthly Expenses (RM)</label>
+              <input type="number" class="form-control" id="cf-expenses" value="${s.monthlyExpenses||''}" min="0" step="100" placeholder="3000">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Expense Inflation (%/yr)</label>
+              <input type="number" class="form-control" id="cf-inflation" value="${s.expenseInflationPct||3}" min="0" step="0.5" placeholder="3">
+            </div>
+            <button class="btn btn-primary w-100" onclick="saveCashflowSettings()">
+              <i class="bi bi-arrow-clockwise me-1"></i>Update Projection
+            </button>
+          </div>
+        </div>
+
+        <!-- Extra Incomes -->
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="card-title">Extra Income Sources</span>
+            <button class="btn btn-sm btn-outline-primary" onclick="showAddExtraIncome()">
+              <i class="bi bi-plus"></i>
+            </button>
+          </div>
+          <div class="card-body p-0">
+            ${extraIncomes.length ? `
+            <table class="table table-sm mb-0">
+              <thead><tr><th>Name</th><th>Amount</th><th>Freq</th><th></th></tr></thead>
+              <tbody>
+                ${extraIncomes.map(ei => `<tr>
+                  <td>${escapeHtml(ei.name)}</td>
+                  <td>${formatRM(ei.amount)}</td>
+                  <td><span class="badge bg-light text-muted">${freqLabel(ei.frequency)}</span></td>
+                  <td><button class="btn btn-sm btn-outline-danger p-0 px-1" onclick="deleteExtraIncome(${ei.id})"><i class="bi bi-trash" style="font-size:11px;"></i></button></td>
+                </tr>`).join('')}
+              </tbody>
+            </table>` : '<div class="p-3 text-muted text-center" style="font-size:13px;">No extra income sources</div>'}
+
+            <!-- Add Extra Income Form -->
+            <div class="p-3 border-top d-none" id="extra-income-form">
+              <div class="row g-2">
+                <div class="col-12"><input type="text" class="form-control form-control-sm" id="ei-name" placeholder="Source name"></div>
+                <div class="col-6"><input type="number" class="form-control form-control-sm" id="ei-amount" placeholder="Amount" min="0" step="100"></div>
+                <div class="col-6">
+                  <select class="form-select form-select-sm" id="ei-freq">
+                    <option value="monthly">Monthly</option>
+                    <option value="annual">Annual</option>
+                    <option value="one_time">One-Time</option>
+                  </select>
+                </div>
+                <div class="col-6"><input type="number" class="form-control form-control-sm" id="ei-start" placeholder="From Year" min="1" max="10" value="1"></div>
+                <div class="col-6"><input type="number" class="form-control form-control-sm" id="ei-end"   placeholder="To Year"   min="1" max="10" value="10"></div>
+                <div class="col-12 d-flex gap-2">
+                  <button class="btn btn-sm btn-primary flex-grow-1" onclick="addExtraIncome()">Add</button>
+                  <button class="btn btn-sm btn-secondary" onclick="hideAddExtraIncome()">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart & Table -->
+      <div class="col-md-7 col-lg-8">
+        <div class="card mb-3 chart-card">
+          <div class="card-header"><span class="card-title">10-Year Projection</span></div>
+          <div class="card-body"><canvas id="cashflowChart" height="180"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Year-by-Year Breakdown</span></div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-sm mb-0">
+                <thead>
+                  <tr>
+                    <th>Year</th><th>Monthly Salary</th><th>Annual Income</th><th>Expenses</th><th>Goal Payments</th><th>Net Savings</th><th>Cumulative</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${results.map(r => `<tr>
+                    <td class="fw-semibold">Yr ${r.year}</td>
+                    <td>${formatRM(r.monthlySalary)}</td>
+                    <td class="text-income">${formatRM(r.annualIncome)}</td>
+                    <td class="text-expense">${formatRM(r.annualExpenses)}</td>
+                    <td class="text-warning">${r.goalPayments > 0 ? formatRM(r.goalPayments) : '-'}</td>
+                    <td class="fw-semibold ${r.netSavings>=0?'text-income':'text-expense'}">${formatRM(r.netSavings)}</td>
+                    <td class="fw-semibold ${r.cumulativeSavings>=0?'text-income':'text-expense'}">${formatRM(r.cumulativeSavings)}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // Cashflow chart
+  destroyChart('cashflow');
+  const cfCtx = document.getElementById('cashflowChart');
+  if (cfCtx) {
+    window._charts['cashflow'] = new Chart(cfCtx, {
+      type: 'bar',
+      data: {
+        labels: results.map(r => `Year ${r.year}`),
+        datasets: [
+          { label: 'Annual Income', data: results.map(r=>r.annualIncome), backgroundColor: 'rgba(22,163,74,0.6)', borderRadius: 4, order: 2 },
+          { label: 'Expenses', data: results.map(r=>r.annualExpenses), backgroundColor: 'rgba(220,38,38,0.6)', borderRadius: 4, order: 2 },
+          { label: 'Goal Payments', data: results.map(r=>r.goalPayments), backgroundColor: 'rgba(245,158,11,0.6)', borderRadius: 4, order: 2 },
+          { label: 'Cumulative Savings', data: results.map(r=>r.cumulativeSavings), type: 'line', borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 4, order: 1 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true,
+        plugins: { legend: { position: 'top' } },
+        scales: { y: { beginAtZero: false, ticks: { callback: v => 'RM'+v.toLocaleString() } } }
+      }
+    });
+  }
+}
+
+function calculateCashflow(settings, extraIncomes, goals) {
+  let cumulativeSavings = 0;
+  const results = [];
+  for (let year = 1; year <= 10; year++) {
+    const monthlySalary = (settings.baseMonthlySalary||0) * Math.pow(1 + (settings.salaryIncrementPct||0)/100, year-1);
+    const annualSalary  = monthlySalary * 12;
+    let otherAnnual = (settings.otherMonthlyIncome||0) * 12;
+
+    for (const ei of extraIncomes) {
+      const start = ei.startYear || 1;
+      const end   = ei.endYear   || 10;
+      if (year >= start && year <= end) {
+        if (ei.frequency === 'monthly')  otherAnnual += (ei.amount||0) * 12;
+        else if (ei.frequency === 'annual')   otherAnnual += (ei.amount||0);
+        else if (ei.frequency === 'one_time' && year === start) otherAnnual += (ei.amount||0);
+      }
+    }
+
+    const totalIncome    = annualSalary + (settings.annualBonus||0) + (settings.thirteenthMonthSalary||0) + otherAnnual;
+    const annualExpenses = (settings.monthlyExpenses||0) * 12 * Math.pow(1 + (settings.expenseInflationPct||0)/100, year-1);
+    const goalPayments   = goals.reduce((sum,g) => sum + ((g.monthlyContribution||0) * 12), 0);
+    const netSavings     = totalIncome - annualExpenses - goalPayments;
+    cumulativeSavings   += netSavings;
+
+    results.push({ year, monthlySalary, annualIncome: totalIncome, annualExpenses, goalPayments, netSavings, cumulativeSavings });
+  }
+  return results;
+}
+
+window.saveCashflowSettings = async function() {
+  const settings = {
+    id: 1,
+    baseMonthlySalary:    parseFloat(document.getElementById('cf-salary').value)       || 0,
+    salaryIncrementPct:   parseFloat(document.getElementById('cf-increment').value)    || 0,
+    annualBonus:          parseFloat(document.getElementById('cf-bonus').value)         || 0,
+    thirteenthMonthSalary:parseFloat(document.getElementById('cf-13th').value)         || 0,
+    otherMonthlyIncome:   parseFloat(document.getElementById('cf-other-income').value) || 0,
+    monthlyExpenses:      parseFloat(document.getElementById('cf-expenses').value)     || 0,
+    expenseInflationPct:  parseFloat(document.getElementById('cf-inflation').value)    || 0
+  };
+  try {
+    await db.update('cashflowSettings', settings);
+    showAlert('Settings saved! Projection updated.');
+    await renderCashflow();
+  } catch (e) {
+    showAlert('Error saving settings: ' + e.message, 'danger');
+  }
+};
+
+window.showAddExtraIncome = function() {
+  document.getElementById('extra-income-form').classList.remove('d-none');
+};
+window.hideAddExtraIncome = function() {
+  document.getElementById('extra-income-form').classList.add('d-none');
+};
+
+window.addExtraIncome = async function() {
+  const name = (document.getElementById('ei-name').value||'').trim();
+  if (!name) { showAlert('Please enter a name.', 'warning'); return; }
+  const amount = parseFloat(document.getElementById('ei-amount').value) || 0;
+  const freq   = document.getElementById('ei-freq').value;
+  const start  = parseInt(document.getElementById('ei-start').value) || 1;
+  const end    = parseInt(document.getElementById('ei-end').value)   || 10;
+
+  try {
+    await db.add('extraIncomes', { name, amount, frequency: freq, startYear: start, endYear: end });
+    showAlert('Extra income added!');
+    await renderCashflow();
+  } catch (e) {
+    showAlert('Error: ' + e.message, 'danger');
+  }
+};
+
+window.deleteExtraIncome = async function(id) {
+  if (!confirm('Delete this extra income source?')) return;
+  try {
+    await db.delete('extraIncomes', id);
+    showAlert('Deleted.');
+    await renderCashflow();
+  } catch (e) {
+    showAlert('Error: ' + e.message, 'danger');
+  }
+};
+
+/* ── Profile ────────────────────────────────────────────────── */
+async function renderProfile() {
+  const app = document.getElementById('app');
+  const profile = await db.get('profile', 1) || { id:1, name:'', familyStatus:'single', numKids:0 };
+
+  app.innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Profile</h1>
+      <p class="page-subtitle">Personalise your MoneyMate experience</p>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Personal Details</span></div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Name</label>
+              <input type="text" class="form-control" id="p-name" value="${escapeHtml(profile.name||'')}" placeholder="Your name">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Family Status</label>
+              <select class="form-select" id="p-status">
+                <option value="single"            ${profile.familyStatus==='single'           ?'selected':''}>Single</option>
+                <option value="married"           ${profile.familyStatus==='married'          ?'selected':''}>Married</option>
+                <option value="married_with_kids" ${profile.familyStatus==='married_with_kids'?'selected':''}>Married with Kids</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Number of Kids</label>
+              <input type="number" class="form-control" id="p-kids" value="${profile.numKids||0}" min="0" max="20">
+            </div>
+            <button class="btn btn-primary" onclick="saveProfile()">
+              <i class="bi bi-save me-1"></i>Save Profile
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Data Management</span></div>
+          <div class="card-body">
+            <p class="text-muted mb-3" style="font-size:13px;">
+              Export all your MoneyMate data as a JSON file, or restore from a previous export.
+            </p>
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-outline-primary" onclick="exportData()">
+                <i class="bi bi-download me-2"></i>Export Data
+              </button>
+              <button class="btn btn-outline-secondary" onclick="document.getElementById('import-file').click()">
+                <i class="bi bi-upload me-2"></i>Import Data
+              </button>
+              <input type="file" id="import-file" class="d-none" accept=".json" onchange="importData(this)">
+            </div>
+            <div class="mt-3 p-3 bg-light rounded" style="font-size:12px;">
+              <i class="bi bi-info-circle me-1 text-primary"></i>
+              Your data is stored locally in your browser (IndexedDB) and never sent to any server.
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt-3">
+          <div class="card-header"><span class="card-title text-danger">Danger Zone</span></div>
+          <div class="card-body">
+            <p class="text-muted mb-3" style="font-size:13px;">
+              Permanently delete all your data. This cannot be undone.
+            </p>
+            <button class="btn btn-danger" onclick="clearAllData()">
+              <i class="bi bi-trash3 me-2"></i>Clear All Data
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+window.saveProfile = async function() {
+  const profile = {
+    id: 1,
+    name:         (document.getElementById('p-name').value   || '').trim(),
+    familyStatus: document.getElementById('p-status').value,
+    numKids:      parseInt(document.getElementById('p-kids').value) || 0
+  };
+  try {
+    await db.update('profile', profile);
+    showAlert('Profile saved!');
+    // Update topbar
+    const avatarEl = document.getElementById('topbar-avatar');
+    if (profile.name && avatarEl) {
+      avatarEl.innerHTML = `<span style="font-size:14px;font-weight:700;">${escapeHtml(profile.name.charAt(0).toUpperCase())}</span>`;
+    }
+  } catch (e) {
+    showAlert('Error saving profile: ' + e.message, 'danger');
+  }
+};
+
+window.exportData = async function() {
+  try {
+    const [statements, transactions, budgets, goals, profile, cashflowSettings, extraIncomes] = await Promise.all([
+      db.getAll('statements'),
+      db.getAll('transactions'),
+      db.getAll('budgets'),
+      db.getAll('goals'),
+      db.get('profile', 1),
+      db.get('cashflowSettings', 1),
+      db.getAll('extraIncomes')
+    ]);
+
+    const data = {
+      exportDate: new Date().toISOString(),
+      version: 1,
+      statements, transactions, budgets, goals,
+      profile: profile ? [profile] : [],
+      cashflowSettings: cashflowSettings ? [cashflowSettings] : [],
+      extraIncomes
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `moneymate-export-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showAlert('Data exported!');
+  } catch (e) {
+    showAlert('Export failed: ' + e.message, 'danger');
+  }
+};
+
+window.importData = async function(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data || typeof data !== 'object') throw new Error('Invalid file format');
+
+      if (!confirm(`This will REPLACE all existing data. Are you sure?\n\nImporting from: ${data.exportDate||'unknown date'}`)) {
+        input.value = '';
+        return;
+      }
+
+      // Clear all stores
+      const stores = ['statements','transactions','budgets','goals','profile','cashflowSettings','extraIncomes'];
+      for (const s of stores) await db.clear(s);
+
+      // Restore
+      if (data.statements)       for (const r of data.statements)       await db.add('statements', r);
+      if (data.transactions)     for (const r of data.transactions)     await db.add('transactions', r);
+      if (data.budgets)          for (const r of data.budgets)          await db.add('budgets', r);
+      if (data.goals)            for (const r of data.goals)            await db.add('goals', r);
+      if (data.profile)          for (const r of data.profile)          await db.update('profile', r);
+      if (data.cashflowSettings) for (const r of data.cashflowSettings) await db.update('cashflowSettings', r);
+      if (data.extraIncomes)     for (const r of data.extraIncomes)     await db.add('extraIncomes', r);
+
+      showAlert('Data imported successfully!');
+      input.value = '';
+      await renderProfile();
+    } catch (err) {
+      showAlert('Import failed: ' + err.message, 'danger');
+      input.value = '';
+    }
+  };
+  reader.readAsText(file);
+};
+
+window.clearAllData = async function() {
+  if (!confirm('This will permanently delete ALL your data (statements, transactions, goals, budgets). This cannot be undone.\n\nAre you absolutely sure?')) return;
+  if (!confirm('FINAL WARNING: All data will be deleted. Click OK to confirm.')) return;
+
+  try {
+    const stores = ['statements','transactions','budgets','goals','extraIncomes'];
+    for (const s of stores) await db.clear(s);
+
+    // Reset profile and cashflow to defaults
+    await db.update('profile', { id:1, name:'User', familyStatus:'single', numKids:0 });
+    await db.update('cashflowSettings', {
+      id:1, baseMonthlySalary:0, salaryIncrementPct:5, annualBonus:0,
+      thirteenthMonthSalary:0, otherMonthlyIncome:0, monthlyExpenses:0, expenseInflationPct:3
+    });
+
+    showAlert('All data cleared.');
+    location.hash = '#dashboard';
+  } catch (e) {
+    showAlert('Error clearing data: ' + e.message, 'danger');
+  }
+};
