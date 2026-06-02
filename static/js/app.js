@@ -562,15 +562,20 @@ async function renderStatements() {
 
             <div class="mb-3">
               <label class="form-label fw-600">Statement File (CSV or PDF)</label>
-              <div class="upload-dropzone" id="dropzone" onclick="document.getElementById('up-file').click()">
-                <i class="bi bi-cloud-upload fs-2 text-muted d-block mb-2"></i>
-                <p class="mb-1 text-muted">Drag &amp; drop or click to browse</p>
-                <p class="text-muted" style="font-size:12px;">Supported: CSV, PDF (including password-protected)</p>
-                <input type="file" id="up-file" accept=".csv,.pdf" class="d-none" onchange="onFileSelected(this)">
-              </div>
-              <div id="file-selected" class="mt-2 d-none">
-                <i class="bi bi-file-earmark-check text-success me-1"></i>
-                <span id="file-name" class="text-success fw-600"></span>
+
+              <!-- iOS-safe: label wraps the input so tapping label opens file picker natively -->
+              <input type="file" id="up-file"
+                     accept=".csv,.pdf,text/csv,application/pdf,application/vnd.ms-excel"
+                     class="d-none" onchange="onFileSelected(this)">
+
+              <label for="up-file" class="btn btn-outline-primary w-100 py-3" style="border-style:dashed;border-width:2px;cursor:pointer;">
+                <i class="bi bi-folder2-open fs-4 d-block mb-1"></i>
+                <span>Tap to choose file (CSV or PDF)</span>
+              </label>
+
+              <div id="file-selected" class="alert alert-success py-2 mt-2 d-none">
+                <i class="bi bi-file-earmark-check me-1"></i>
+                <span id="file-name" class="fw-600"></span>
               </div>
             </div>
 
